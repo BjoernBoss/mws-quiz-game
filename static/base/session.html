@@ -1,0 +1,44 @@
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<!-- Copyright (c) 2024-2025 Bjoern Boss Henrichsen -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>New Session Created!</title>
+	<link rel="stylesheet" type="text/css" href="/quiz-game/base/style.css">
+</head>
+
+<body contenteditable="false">
+	<!-- links to the interface screen -->
+	<div class="main">
+		<div class="content">
+			<p class="title">New Session Created!</p>
+			<div style="height:1.5em;"></div>
+			<p class="detail">Link for Players:</p>
+			<a class="detail" id="player">link</a>
+			<p class="detail">Link to Scoreboard:</p>
+			<a class="detail" id="score">link</a>
+			<div style="height:1.5em;"></div>
+			<p class="detail">Session will be deleted after 20 Minutes of inactivity!</p>
+			<p class="detail">Sessions can be rejoined by using the same name.</p>
+		</div>
+	</div>
+</body>
+
+<script>
+	window.onload = function () {
+		let player = document.getElementById('player');
+		let score = document.getElementById('score');
+		let base = `${location.protocol}//${location.host}/quiz-game`;
+
+		player.href = `${base}/client${location.search}`;
+		score.href = `${base}/score${location.search}`;
+
+		player.innerText = player.href;
+		score.innerText = score.href;
+	};
+</script>
+
+</html>

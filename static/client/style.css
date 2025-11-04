@@ -1,0 +1,312 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
+html,
+body {
+	margin: 0;
+	height: 100%;
+	user-select: none;
+}
+
+.core {
+	overflow: clip;
+	background-color: rgb(212, 212, 212);
+	display: flex;
+	flex-flow: column;
+	height: 100%;
+}
+
+.header {
+	background-color: rgb(158, 158, 158);
+	flex-grow: 0;
+	flex-direction: column;
+	padding: 1em;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	font-weight: bold;
+	text-align: center;
+	color: black;
+}
+
+.header .details:not(.hidden) {
+	display: flex;
+	flex-direction: row;
+	margin: 0;
+	border-style: solid;
+	border-width: 0 0 2px 0;
+	font-size: 1.5em;
+}
+
+.header .small {
+	margin-top: 1em;
+	font-size: 1.8em;
+}
+
+.core-separator {
+	height: 0.25em;
+	min-height: 0.25em;
+	background-color: #404040;
+}
+
+.footer {
+	flex-grow: 0;
+	flex-flow: row;
+	background-color: rgb(158, 158, 158);
+	padding: 1em;
+	display: flex;
+	justify-content: end;
+}
+
+.footer .button p {
+	font-size: 2em;
+}
+
+.description {
+	text-align: center;
+	margin-top: 1em;
+	font-size: 2em;
+	font-weight: bold;
+}
+
+@media (max-width: 640px) {
+	.header .small {
+		font-size: 1.2em;
+	}
+
+	.footer .button p {
+		font-size: 1.2em;
+	}
+
+	.header .details:not(.hidden) {
+		font-size: 1em;
+	}
+
+}
+
+.slider {
+	margin-top: 1em;
+	overflow: clip;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+}
+
+.slider p {
+	margin: 0.3em;
+	color: black;
+	font-size: 2em;
+	font-weight: bolder;
+	text-align: center;
+	padding: 0 1em;
+}
+
+.slidebar {
+	appearance: none;
+	width: 100%;
+	height: 2em;
+	border-radius: 1em;
+	outline: none;
+	margin: 1em 0;
+}
+
+.value0 .slidebar {
+	background-color: #00e1ff;
+}
+
+.value1 .slidebar {
+	background-color: #ffffff;
+}
+
+.value2 .slidebar {
+	background-color: #48ff30;
+}
+
+.value3 .slidebar {
+	background-color: #ffec46;
+}
+
+.value4 .slidebar {
+	background-color: #ff2f2f;
+}
+
+.slidebar::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 2.5em;
+	height: 2.5em;
+	border-radius: 50%;
+	background: black;
+	cursor: pointer;
+}
+
+.slidebar::-moz-range-thumb {
+	width: 2.5em;
+	height: 2.5em;
+	border-radius: 50%;
+	background: black;
+	cursor: pointer;
+}
+
+.login {
+	width: 100%;
+	height: 100%;
+	background-color: #c0c0c0;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.login .content {
+	width: 80%;
+	background-color: white;
+	border-radius: 1em;
+	border-width: 0.2em;
+	border-color: #606060;
+	border-style: solid;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	padding: 1em;
+}
+
+.login .content .title {
+	color: black;
+	font-size: 3em;
+	margin: 0;
+	text-align: center;
+}
+
+.login .content .name {
+	background-color: #d0d0d0;
+	width: 100%;
+	height: 1em;
+	border-radius: 0.3em;
+	border-width: 0 0 0.1em 0;
+	border-style: solid;
+	border-color: #303030;
+	font-size: 1.5em;
+	font-weight: bold;
+	padding: 0.15em;
+	outline-style: none;
+}
+
+.login .content .name::placeholder {
+	font-style: italic;
+	font-weight: normal;
+	color: #b0b0b0;
+}
+
+.login .content .name:focus {
+	border-color: #5050ff;
+	border-width: 0 0 0.15em 0;
+}
+
+.login .confirm {
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+}
+
+.login .confirm .button .interact p {
+	font-size: 2.5em;
+}
+
+.login .confirm .button {
+	background-color: #a0a0a0;
+	border-radius: 1em;
+	border-width: 0.3em;
+	border-style: solid;
+	border-color: #606060;
+	flex: 1 1 auto;
+	overflow: clip;
+	margin: 0.2em 0;
+}
+
+.login .warning:not(.hidden) {
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+}
+
+.login .warning p {
+	margin: 0;
+	width: 100%;
+	color: #ff4040;
+	font-size: 2em;
+	font-style: italic;
+	font-weight: bold;
+}
+
+.splash-screen {
+	overflow: auto;
+	flex-grow: 1;
+	font-size: 3.5em;
+	font-weight: bold;
+	color: #404040;
+	justify-content: center;
+	align-items: center;
+	padding: 1em;
+	text-align: center;
+	display: flex;
+}
+
+.splash-screen p {
+	margin: 0;
+}
+
+.scroll-screen {
+	overflow: auto;
+	flex-grow: 1;
+}
+
+.scrollable {
+	position: relative;
+	padding: 0 2em 2em 2em;
+	background-color: rgb(212, 212, 212);
+	display: flex;
+	flex-flow: column;
+	overflow: hidden;
+	min-height: calc(100% - 2em);
+}
+
+.reduced {
+	min-height: unset;
+}
+
+.scrollable .button {
+	margin-top: 2em;
+}
+
+.ready-overlay {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	left: 0;
+	top: 0;
+	background-color: #00000080;
+}
+
+.score {
+	margin-top: 1em;
+	border-style: solid;
+	border-color: black;
+	border-width: 0.1em 0;
+}
+
+.score .name {
+	margin: 0;
+	font-size: 2em;
+	font-weight: bold;
+}
+
+.score .detail {
+	margin: 0 1em 0 0;
+	font-size: 1em;
+	font-weight: bold;
+}
+
+.hidden {
+	display: none;
+}

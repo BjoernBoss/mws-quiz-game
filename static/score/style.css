@@ -1,0 +1,96 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
+html,
+body {
+	margin: 0;
+	height: 100%;
+	user-select: none;
+}
+
+.core {
+	overflow: clip;
+	background-color: rgb(212, 212, 212);
+	display: flex;
+	flex-flow: column;
+	height: 100%;
+}
+
+.header {
+	background-color: rgb(158, 158, 158);
+	flex-grow: 0;
+	flex-direction: column;
+	padding: 1em;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	font-weight: bold;
+	text-align: center;
+	color: black;
+}
+
+.header .details {
+	display: flex;
+	flex-direction: row;
+	margin: 0;
+	border-style: solid;
+	border-width: 0 0 2px 0;
+	font-size: 1.5em;
+}
+
+.header .small {
+	margin-top: 0.5em;
+	font-size: 1.8em;
+}
+
+@media (max-width: 640px) {
+	.header .small {
+		font-size: 1.2em;
+	}
+
+	.header .details {
+		font-size: 1em;
+	}
+}
+
+.core-separator {
+	height: 0.25em;
+	min-height: 0.25em;
+	background-color: #404040;
+}
+
+.scroll-screen {
+	overflow: auto;
+	flex-grow: 1;
+}
+
+.scrollable {
+	position: relative;
+	padding: 0 2em 2em 2em;
+	background-color: rgb(212, 212, 212);
+	display: flex;
+	flex-flow: column;
+	overflow: hidden;
+}
+
+.score {
+	margin-top: 1em;
+	border-style: solid;
+	border-color: black;
+	border-width: 0.1em 0;
+}
+
+.score .name {
+	margin: 0;
+	font-size: 2em;
+	font-weight: bold;
+}
+
+.score .detail {
+	margin: 0 1em 0 0;
+	font-size: 1em;
+	font-weight: bold;
+}
+
+.hidden {
+	display: none;
+}

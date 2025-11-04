@@ -1,0 +1,221 @@
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<!-- Copyright (c) 2024-2025 Bjoern Boss Henrichsen -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Normal Player!</title>
+	<link rel="stylesheet" type="text/css" href="/quiz-game/common/buttons.css">
+	<link rel="stylesheet" type="text/css" href="/quiz-game/client/style.css">
+	<script src="/quiz-game/common/sync-socket.js"></script>
+	<script src="/quiz-game/client/script.js"></script>
+</head>
+
+<body contenteditable="false">
+
+	<!-- initial/error login screen -->
+	<div class="login" id="login">
+		<div class="content">
+			<p class="title">Whats your Name?</p>
+			<div style="height:1.5em;"></div>
+			<input class="name" type="text" placeholder="Name..." id="name">
+			<div style="height:1.5em;"></div>
+			<div class="warning hidden" id="warning">
+				<p id="warning-text" class="text">A Warning!</p>
+				<div style="height:1.5em;"></div>
+			</div>
+			<div class="confirm">
+				<div class="button">
+					<div class="clickable" onclick="_game.login();">
+						<p>Start Playing!</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- active game screen (contains header/footer and active-body) -->
+	<div class="core hidden" id="main">
+		<!-- header: visible at all times and contains: score/name/category/question -->
+		<div class="header">
+			<div class="details">
+				<div style="margin: 0 1em;" id="self-name">Name:</div>
+				<div style="margin: 0 1em;" id="score">Score:</div>
+			</div>
+			<div class="details" style="border-style: none;">
+				<div style="margin: 0 1em;" id="round">Round:</div>
+				<div style="margin: 0 1em;" id="confidence">Confidence:</div>
+			</div>
+			<div class="small" id="category">Category:</div>
+			<div class="small" id="question">Question</div>
+			<div class="small" id="delta">Points:</div>
+		</div>
+		<div class="core-separator"></div>
+
+		<!-- splash-screen to display start/game-over -->
+		<div class="splash-screen hidden" id="splash-screen">
+			<p id="splash-message"></p>
+		</div>
+
+		<!-- setup-screen to select confidence and jokers -->
+		<div class="scroll-screen hidden" id="setup-screen">
+			<div class="scrollable">
+				<!-- toggled whenver the player has logged his result -->
+				<div class="ready-overlay" id="setup-lock"></div>
+
+				<!-- confidence slider -->
+				<div class="slider value0" id="confidence-select">
+					<p id="confidence-value">Confidence:</p>
+					<input type="range" min="-1" max="3" value="0" class="slidebar" id="confidence-slider"
+						oninput="_game.slide(this.value)">
+				</div>
+
+				<!-- expose button -->
+				<div class="button" id="expose">
+					<div class="clickable" onclick="_game.activate('expose')">
+						<p>Show Question</p>
+						<p class="sub">Show the current question already now</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- protect button -->
+				<div class="button" id="protect">
+					<div class="clickable" onclick="_game.activate('protect')">
+						<p>Protect</p>
+						<p class="sub">Protect me from any effects</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- fail button -->
+				<div class="button" id="fail">
+					<div class="clickable" onclick="_game.activate('fail')">
+						<p>Wrong</p>
+						<p class="sub">Ensure that the opponent fails, no matter his choice</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- zero button -->
+				<div class="button" id="zero">
+					<div class="clickable" onclick="_game.activate('zero')">
+						<p>No Points</p>
+						<p class="sub">Prevent the opponent from getting points</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- min button -->
+				<div class="button" id="min">
+					<div class="clickable" onclick="_game.activate('min')">
+						<p>No Confidence</p>
+						<p class="sub">Set the opponents confidence to -1</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- max button -->
+				<div class="button" id="max">
+					<div class="clickable" onclick="_game.activate('max')">
+						<p>Absolute Confidence</p>
+						<p class="sub">Set the opponents confidence to 3</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- steal button -->
+				<div class="button" id="steal">
+					<div class="clickable" onclick="_game.activate('steal')">
+						<p>Steal Points</p>
+						<p class="sub">Steal all points the opponent earns or loses</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- swap button -->
+				<div class="button" id="swap">
+					<div class="clickable" onclick="_game.activate('swap')">
+						<p>Swap</p>
+						<p class="sub">Swap all points with opponent if he picks the right answer</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+
+				<!-- double button -->
+				<div class="button" id="double">
+					<div class="clickable" onclick="_game.activate('double')">
+						<p>Double or Nothing</p>
+						<p class="sub">Double points if you pick right or lose all points</p>
+						<p class="sub">Timeout</p>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- select-screen to select a player for an effect -->
+		<div class="scroll-screen hidden" id="select-screen">
+			<div class="scrollable" id="select-content">
+				<!-- description of type of selection -->
+				<div class="description" id="select-text">
+					Description
+				</div>
+
+				<!-- return button (No-one selected) -->
+				<div class="button">
+					<div class="clickable" onclick="_game.pick(null)">
+						<p>Cancel</p>
+						<p class="sub">Nobody will be selected</p>
+					</div>
+				</div>
+
+				<!-- here the list of options will be added -->
+			</div>
+		</div>
+
+		<!-- game-screen to select a game/option and present the solution -->
+		<div class="scroll-screen hidden" id="game-screen">
+			<div class="scrollable" id="game-content">
+				<!-- toggled whenver the player has logged his result -->
+				<div class="ready-overlay" id="game-lock"></div>
+
+				<!-- here the list of options will be added -->
+			</div>
+		</div>
+
+		<!-- score-screen to view the current score-board -->
+		<div class="scroll-screen hidden" id="score-screen">
+			<div class="scrollable reduced">
+				<div id="score-content">
+					<!-- here the list of players will be added -->
+				</div>
+			</div>
+
+			<div class="button" style="margin: 0 2em 2em 2em;">
+				<div class="clickable" onclick="confirm('Remove from game?') ? _game.remove() : null">
+					<p>Remove Me!</p>
+				</div>
+			</div>
+		</div>
+
+		<!-- footer: contains button to toggle ready/board -->
+		<div class="core-separator"></div>
+		<div class="footer">
+			<div class="button" style="flex-grow: 1;" id="ready">
+				<div class="clickable" onclick="_game.ready()">
+					<p>Ready</p>
+				</div>
+			</div>
+			<div style="width: 2em;"></div>
+			<div class="button">
+				<div class="clickable" onclick="_game.toggleScore()">
+					<p id="toggle-board">Board</p>
+				</div>
+			</div>
+		</div>
+	</div>
+</body>
+
+</html>

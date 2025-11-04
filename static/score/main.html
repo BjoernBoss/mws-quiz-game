@@ -1,0 +1,43 @@
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<!-- Copyright (c) 2024-2025 Bjoern Boss Henrichsen -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Scoreboard!</title>
+	<link rel="stylesheet" type="text/css" href="/quiz-game/score/style.css">
+	<script src="/quiz-game/common/sync-socket.js"></script>
+	<script src="/quiz-game/score/script.js"></script>
+</head>
+
+<body contenteditable="false">
+	<!-- active game screen (contains header/footer and active-body) -->
+	<div class="core">
+		<!-- header: visible at all times and contains: score/name/category/question -->
+		<div class="header">
+			<div class="details">
+				<div style="margin: 0 1em;" id="round">Round:</div>
+			</div>
+			<div class="details" style="border-width: 0;">
+				<div style="margin: 0 1em;" id="phase">Phase:</div>
+			</div>
+			<div class="small hidden" id="category">Category:</div>
+			<div class="small hidden" id="question">Question</div>
+			<div class="small hidden" id="correct">Correct:</div>
+		</div>
+		<div class="core-separator"></div>
+
+		<!-- score-screen to view the current score-board -->
+		<div class="scroll-screen">
+			<div class="scrollable">
+				<div id="score-content">
+					<!-- here the list of players will be added -->
+				</div>
+			</div>
+		</div>
+	</div>
+</body>
+
+</html>

@@ -8,6 +8,8 @@ It provides an interactive way play a quiz-game, consisting of about 190 questio
 It allows this by making use of `WebSockets`.
 The quiz-game allows players to use fun special effects on other players, such as taking away their points, or teasing them in other ways.
 
+All active sessions are managed by the created `QuizGame` object. Sharing this object across multiple listened ports will therefore ensure each port shares a common player base.
+
 ## Using the Module
 To use this module, setup the `mws-base`. Then simply clone this repository into the modules directory:
 

@@ -359,6 +359,7 @@ export class QuizGame implements libCommon.ModuleInterface {
 	private jsonQuestions: Question[];
 	private sessions: Map<string, Session>;
 
+	public name: string = 'quiz-game';
 	constructor() {
 		this.fileStatic = libLocation.MakeSelfPath(import.meta.url, '/static');
 		const questionPath = libLocation.MakeSelfPath(import.meta.url)('./categorized-questions.json');

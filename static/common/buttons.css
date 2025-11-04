@@ -62,17 +62,49 @@
 	background-color: #4095ff;
 }
 
+.selected-correct .clickable {
+	background-color: #a6ff40;
+}
+
+.selected-wrong .clickable {
+	background-color: #fd9595;
+}
+
 .disabled.selected .clickable {
 	background-color: #0055bd;
+}
+
+.disabled.selected-correct .clickable {
+	background-color: #539c00;
+}
+
+.disabled.selected-wrong .clickable {
+	background-color: #bd3d3d;
 }
 
 .selected:not(.disabled) .clickable:active {
 	background-color: #0055bd;
 }
 
+.selected-correct:not(.disabled) .clickable:active {
+	background-color: #539c00;
+}
+
+.selected-wrong:not(.disabled) .clickable:active {
+	background-color: #bd3d3d;
+}
+
 @media (hover: hover) {
 	.selected .clickable:hover {
 		background-color: #0055bd;
+	}
+
+	.selected-correct .clickable:hover {
+		background-color: #539c00;
+	}
+
+	.selected-wrong .clickable:hover {
+		background-color: #bd3d3d;
 	}
 }
 

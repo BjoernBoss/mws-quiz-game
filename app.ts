@@ -44,7 +44,7 @@ enum GamePhase {
 	answer = 'answer',
 	resolved = 'resolved',
 	done = 'done'
-}
+};
 
 class GameState {
 	private players: Record<string, PlayerState>;

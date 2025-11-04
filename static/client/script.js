@@ -428,11 +428,15 @@ _game.applyQuestion = function () {
 		let node = _game.htmlGameContent.children[i + 1];
 		let question = _game.state.question;
 
-		/* setup the selection-index */
-		if (_game.toScramble[_game.self.choice] == i)
+		/* setup the selection-theme */
+		if (_game.toScramble[_game.self.choice] != i)
+			node.classList.remove('selected', 'selected-correct', 'selected-wrong');
+		else if (_game.state.phase == 'answer')
 			node.classList.add('selected');
+		else if (_game.toScramble[question.correct] == i && _game.self.applied.fail == null)
+			node.classList.add('selected-correct');
 		else
-			node.classList.remove('selected');
+			node.classList.add('selected-wrong');
 
 		/* setup the disabled-index */
 		if (_game.state.phase == 'resolved')
@@ -445,7 +449,7 @@ _game.applyQuestion = function () {
 			node.classList.remove('invalid');
 			node.classList.remove('correct');
 		}
-		else if (_game.toScramble[question.correct] == i && _game.self.applied.fail == null) {
+		else if (_game.toScramble[question.correct] == i) {
 			node.classList.remove('invalid');
 			node.classList.add('correct');
 		}

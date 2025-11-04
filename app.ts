@@ -1,32 +1,55 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
-import * as libLog from "../../server/log.js";
+import * as libCommon from "core/common.js";
+import * as libClient from "core/client.js";
+import * as libLog from "core/log.js";
+import * as libLocation from "core/location.js";
 import * as libFs from "fs";
 import * as libCrypto from "crypto";
-import * as libLocation from "../../server/location.js";
+import * as libWs from "ws";
 
-const fileApp = libLocation.makeAppPath(import.meta.url);
-const fileStatic = libLocation.makeAppPath(import.meta.url, 'static');
+const sessionTimeoutMinutes = 20;
 
-let JsonQuestions = JSON.parse(libFs.readFileSync(fileApp('categorized-questions.json'), 'utf8'));
-let Sessions = {};
+interface PlayerState {
+	ready: boolean;
+	confidence: number;
+	choice: number;
+	correct: boolean;
+	delta: number;
+	score: number;
+};
+interface Question {
+	text: string;
+	options: string[4];
+	correct: number;
+	category: string;
+}
+
+enum GamePhase {
+	start, category, answer, resolved, done
+}
 
 class GameState {
-	constructor() {
-		this.phase = 'start'; //start,category,answer,resolved,done
-		this.question = null;
-		this.remaining = [];
-		this.players = {};
-		this.round = null;
+	private players: Record<string, PlayerState>;
+	private phase: GamePhase;
+	private question: Question | null;
+	private round: number;
+	private remaining: Question[];
+	private total: number;
 
-		for (let i = 0; i < JsonQuestions.length; ++i)
-			this.remaining.push(i);
+	constructor(questions: Question[]) {
+		this.phase = GamePhase.start;
+		this.question = null;
+		this.players = {};
+		this.round = 0;
+		this.remaining = questions.slice();
+		this.total = this.remaining.length;
 	}
-	resetPlayerReady() {
+	private resetPlayerReady(): void {
 		for (const key in this.players)
 			this.players[key].ready = false;
 	}
-	resetPlayersForPhase() {
+	private resetPlayersForPhase(): void {
 		/* reset the player states for the next phase */
 		for (const key in this.players) {
 			let player = this.players[key];
@@ -40,7 +63,7 @@ class GameState {
 				player.applied[eff] = null;
 		}
 	}
-	applyEffects() {
+	private applyEffects(): void {
 		/* initialize the actual confidences to be used and the effects to be applied to each */
 		let confidence = {};
 		let effects = {};
@@ -131,7 +154,7 @@ class GameState {
 		}
 
 		/* compute the points each player will earn and apply double-or-nothing */
-		let points = {};
+		let points: Rector<string, number> = {};
 		for (const key in this.players) {
 			let player = this.players[key];
 
@@ -225,62 +248,62 @@ class GameState {
 			player.ready = false;
 		}
 	}
-	advanceStage() {
+	public advanceStage(): void {
 		/* check if all players are valid */
 		for (const key in this.players) {
 			if (!this.players[key].ready)
 				return;
 		}
-		if (this.players.length < 2)
+		if (Object.keys(this.players).length < 2)
 			return;
 
 		/* check if the next stage needs to be picked */
-		if (this.phase == 'start' || this.phase == 'resolved') {
+		if (this.phase == GamePhase.start || this.phase == GamePhase.resolved) {
 			if (this.remaining.length == 0) {
-				this.phase = 'done';
+				this.phase = GamePhase.done;
 				this.question = null;
 				this.resetPlayersForPhase();
 				return;
 			}
 
 			/* advance the round and select the next question */
-			if (this.phase == 'start')
+			if (this.phase == GamePhase.start)
 				this.round = 0;
 			else
 				this.round += 1;
 			let index = Math.floor(Math.random() * this.remaining.length);
-			this.question = JsonQuestions[this.remaining[index]];
+			this.question = this.remaining[index];
 			this.remaining.splice(index, 1);
-			this.phase = 'category';
+			this.phase = GamePhase.category;
 			this.resetPlayersForPhase();
 			return;
 		}
 
 		/* check if the answer-round can be started */
-		if (this.phase == 'category') {
-			this.phase = 'answer';
+		if (this.phase == GamePhase.category) {
+			this.phase = GamePhase.answer;
 			this.resetPlayerReady();
 			return;
 		}
 
 		/* apply all effects (will mark the players as not ready) and advance the stage */
 		this.applyEffects();
-		this.phase = 'resolved';
+		this.phase = GamePhase.resolved;
 	}
-	makeState() {
+	public makeState() {
 		return {
 			cmd: 'state',
 			state: {
 				phase: this.phase,
 				question: this.question,
-				totalQuestions: JsonQuestions.length,
+				totalQuestions: this.total,
 				players: this.players,
 				round: this.round,
 			}
 		};
 	}
-	updatePlayer(name, state) {
-		if (state == undefined || state == null)
+	public updatePlayer(name: string, state: PlayerState | null): void {
+		if (state == null)
 			delete this.players[name];
 		else
 			this.players[name] = state;
@@ -288,22 +311,25 @@ class GameState {
 	}
 };
 class Session {
-	constructor() {
-		this.state = new GameState();
-		this.ws = [];
+	public timeout: NodeJS.Timeout | null;
+	public dead: number;
+	public ws: Set<libWs.WebSocket>;
+	public state: GameState;
+
+	constructor(questions: Question[]) {
+		this.state = new GameState(questions);
+		this.ws = new Set<libWs.WebSocket>();
 		this.dead = 0;
-		this.nextId = 0;
 		this.timeout = null;
 	}
 
-	sync() {
+	public sync(): void {
 		this.dead = 0;
-		let msg = JSON.stringify(this.state.makeState());
-		for (let i = 0; i < this.ws.length; ++i)
-			this.ws[i].send(msg);
+		const msg = JSON.stringify(this.state.makeState());
+		this.ws.forEach(ws => ws.send(msg));
 	}
 
-	handle(msg) {
+	public handle(msg: any): { cmd: string } | null {
 		if (typeof (msg.cmd) != 'string' || msg.cmd == '')
 			return { cmd: 'malformed' };
 
@@ -323,121 +349,128 @@ class Session {
 	}
 };
 
-function SetupSession() {
-	let id = libCrypto.randomUUID();
-	libLog.Log(`Session created: ${id}`);
-	let session = (Sessions[id] = new Session());
+export class Application implements libCommon.AppInterface {
+	private fileStatic: (path: string) => string;
+	private jsonQuestions: Question[];
+	private sessions: Map<string, Session>;
 
-	/* setup the session-timeout checker (20 minutes)
-	*	(only considered alive when the state changes) */
-	session.timeout = setInterval(function () {
-		if (session.dead++ < 21)
-			return;
-		for (let i = 0; i < session.ws.length; ++i)
-			session.ws[i].close();
-		delete Sessions[id];
-		clearInterval(session.timeout);
-		libLog.Log(`Session deleted: ${id}`);
-	}, 1000 * 60);
-	return id;
-}
-function AcceptWebSocket(ws, id) {
-	/* check if the session exists */
-	if (!(id in Sessions)) {
-		libLog.Log(`WebSocket connection for unknown session: ${id}`);
-		ws.send(JSON.stringify({ cmd: 'unknown-session' }));
-		ws.close();
-		return;
-	}
-	let session = Sessions[id];
-
-	/* register the listener */
-	session.ws.push(ws);
-
-	/* setup the socket */
-	let uniqueId = ++session.nextId;
-	ws.log = function (msg) { libLog.Log(`WS[${id}|${uniqueId}]: ${msg}`); };
-	ws.err = function (msg) { libLog.Error(`WS[${id}|${uniqueId}]: ${msg}`); };
-	ws.log(`websocket connected`);
-
-	/* register the callbacks */
-	ws.on('message', function (msg) {
-		try {
-			let parsed = JSON.parse(msg);
-
-			/* handle the message accordingly */
-			let response = session.handle(parsed);
-			if (response != null) {
-				ws.log(`received: ${parsed.cmd} -> ${response.cmd}`);
-				ws.send(JSON.stringify(response));
-			}
-			else
-				ws.log(`received: ${parsed.cmd}`);
-		} catch (err) {
-			ws.err(`exception while message: [${err}]`);
-			ws.close();
-		}
-	});
-	ws.on('close', function () {
-		session.ws = session.ws.filter((s) => (s != ws));
-		ws.log(`websocket disconnected`);
-		ws.close();
-	});
-}
-
-export class Application {
 	constructor() {
-		this.path = '/quiz-game';
+		this.fileStatic = libLocation.MakeAppPath(import.meta.url, '/static');
+		const questionPath = libLocation.MakeAppPath(import.meta.url)('./categorized-questions.json');
+		this.jsonQuestions = JSON.parse(libFs.readFileSync(questionPath, 'utf8'));
+		this.sessions = new Map<string, Session>()
 	}
-	request(msg) {
-		libLog.Log(`Game handler for [${msg.relative}]`);
-		if (msg.ensureMethod(['GET']) == null)
+
+	private setupSession() {
+		let id = libCrypto.randomUUID();
+		libLog.Log(`Session created: ${id}`);
+		let session = new Session(this.jsonQuestions);
+		this.sessions.set(id, session);
+
+		/* setup the session-timeout checker (only considered alive when the state changes) */
+		let that = this;
+		session.timeout = setInterval(function () {
+			if (session.dead++ < sessionTimeoutMinutes + 1)
+				return;
+
+			/* close all connections */
+			session.ws.forEach((ws) => ws.close());
+
+			/* delete the session */
+			that.sessions.delete(id);
+			if (session.timeout != null)
+				clearInterval(session.timeout);
+			libLog.Log(`Session deleted: ${id}`);
+		}, 60 * 1000);
+		return id;
+	}
+	private acceptWebSocket(client: libClient.HttpUpgrade, ws: libWs.WebSocket, id: string): void {
+		/* check if the session exists */
+		if (!this.sessions.has(id)) {
+			libLog.Log(`WebSocket connection for unknown session: ${id}`);
+			ws.send(JSON.stringify({ cmd: 'unknown-session' }));
+			ws.close();
+			return;
+		}
+		let session = this.sessions.get(id)!;
+
+		/* register the listener */
+		session.ws.add(ws);
+		client.log(`Websocket connected`);
+
+		/* register the callbacks */
+		ws.on('message', function (msg) {
+			try {
+				let parsed = JSON.parse(msg.toString('utf-8'));
+
+				/* handle the message accordingly */
+				let response = session.handle(parsed);
+				if (response != null) {
+					client.log(`Received: ${parsed.cmd} -> ${response.cmd}`);
+					ws.send(JSON.stringify(response));
+				}
+				else
+					client.log(`Received: ${parsed.cmd}`);
+			} catch (err) {
+				client.log(`Exception while message: [${err}]`);
+				ws.close();
+			}
+		});
+		ws.on('close', function () {
+			session.ws.delete(ws);
+			client.log(`Websocket disconnected`);
+		});
+	}
+
+	public request(client: libClient.HttpRequest): void {
+		client.log(`Game handler for [${client.path}]`);
+		if (client.ensureMethod(['GET']) == null)
 			return;
 
 		/* check if its a root-request and forward it accordingly */
-		if (msg.relative == '/') {
-			msg.tryRespondFile(fileStatic('base/startup.html'));
+		if (client.path == '/') {
+			client.tryRespondFile(this.fileStatic('base/startup.html'));
 			return;
 		}
 
 		/* check if a new session has been requested and create it */
-		if (msg.relative == '/new') {
-			let id = SetupSession();
-			msg.respondRedirect(`${this.path}/session` + `?id=${id}`);
+		if (client.path == '/new') {
+			let id = this.setupSession();
+			client.respondRedirect(`${client.basepath}/session` + `?id=${id}`);
 			return;
 		}
 
 		/* check if a session-dependent page has been requested */
-		if (msg.relative == '/session') {
-			msg.tryRespondFile(fileStatic('base/session.html'));
+		if (client.path == '/session') {
+			client.tryRespondFile(this.fileStatic('base/session.html'));
 			return
 		}
-		if (msg.relative == '/client') {
-			msg.tryRespondFile(fileStatic('client/main.html'));
+		if (client.path == '/client') {
+			client.tryRespondFile(this.fileStatic('client/main.html'));
 			return;
 		}
-		if (msg.relative == '/score') {
-			msg.tryRespondFile(fileStatic('score/main.html'));
+		if (client.path == '/score') {
+			client.tryRespondFile(this.fileStatic('score/main.html'));
 			return;
 		}
 
 		/* respond to the request by trying to server the file */
-		msg.tryRespondFile(fileStatic(msg.relative));
+		client.tryRespondFile(this.fileStatic(client.path));
 	}
-	upgrade(msg) {
-		libLog.Log(`Game handler for [${msg.relative}]`);
+	public upgrade(client: libClient.HttpUpgrade): void {
+		client.log(`Game handler for [${client.path}]`);
 
 		/* check if the websocket has been requested */
-		if (!msg.relative.startsWith('/ws/')) {
-			msg.respondNotFound();
+		if (!client.path.startsWith('/ws/')) {
+			client.respondNotFound();
 			return;
 		}
 
 		/* extract the id and try to accept the socket */
-		let id = msg.relative.substring(4);
-		if (msg.tryAcceptWebSocket((ws) => AcceptWebSocket(ws, id)))
+		let id = client.path.substring(4);
+		if (client.tryAcceptWebSocket((ws) => this.acceptWebSocket(client, ws, id)))
 			return;
-		libLog.Warning(`Invalid request for web-socket point for session: [${id}]`);
-		msg.respondNotFound();
+		client.log(`Invalid request for web-socket point for session: [${id}]`);
+		client.respondNotFound();
 	}
 };

@@ -10,23 +10,40 @@ import * as libWs from "ws";
 
 const sessionTimeoutMinutes = 20;
 
-interface PlayerState {
-	ready: boolean;
-	confidence: number;
-	choice: number;
-	correct: boolean;
-	delta: number;
-	score: number;
-};
 interface Question {
 	text: string;
 	options: string[4];
 	correct: number;
 	category: string;
-}
-
+};
+interface GameEffects<T> {
+	expose?: T;
+	double?: T;
+	protect?: T;
+	fail?: T;
+	swap?: T;
+	zero?: T;
+	min?: T;
+	max?: T;
+	steal?: T;
+};
+interface PlayerState {
+	ready: boolean;
+	confidence: number;
+	payout: number;
+	choice: number;
+	correct: boolean;
+	delta: number;
+	score: number;
+	effects: GameEffects<string>;
+	applied: GameEffects<string>;
+};
 enum GamePhase {
-	start, category, answer, resolved, done
+	start = 'start',
+	category = 'category',
+	answer = 'answer',
+	resolved = 'resolved',
+	done = 'done'
 }
 
 class GameState {
@@ -46,52 +63,54 @@ class GameState {
 		this.total = this.remaining.length;
 	}
 	private resetPlayerReady(): void {
-		for (const key in this.players)
-			this.players[key].ready = false;
+		for (const name in this.players)
+			this.players[name].ready = false;
 	}
 	private resetPlayersForPhase(): void {
 		/* reset the player states for the next phase */
-		for (const key in this.players) {
-			let player = this.players[key];
+		for (const name in this.players) {
+			let player = this.players[name];
 			player.ready = false;
 			player.confidence = 1;
 			player.choice = -1;
 			player.correct = false;
-			for (const eff in player.effects)
-				player.effects[eff] = null;
-			for (const eff in player.applied)
-				player.applied[eff] = null;
+			player.effects = {};
+			player.applied = {};
 		}
 	}
 	private applyEffects(): void {
-		/* initialize the actual confidences to be used and the effects to be applied to each */
-		let confidence = {};
-		let effects = {};
-		for (const key in this.players) {
-			let player = this.players[key];
-			confidence[key] = player.confidence;
+		const appliedTo: Record<string, GameEffects<string[]>> = {};
 
-			for (const eff in player.effects) {
-				let victim = player.effects[eff];
-
-				/* check if no vicitm has been selected, or the effect will be handled separately */
-				if (victim == null || eff in ['espose', 'protect', 'double'])
+		/* collect the list of players who applied each effect to each other */
+		for (const name in this.players) {
+			const player = this.players[name];
+			for (const effect of ['fail', 'swap', 'zero', 'min', 'max', 'steal']) {
+				const victim = ((player.effects as any)[effect] as (string | undefined));
+				if (victim == null)
 					continue;
 
-				/* check if a victim exists and add it to the effects list */
-				if (!(victim in effects))
-					effects[victim] = {};
+				/* check if the victim exists and add it the the inverse-map */
+				if (!(victim in appliedTo))
+					appliedTo[victim] = {};
+				const applied = appliedTo[victim];
 
-				/* add the attacker to the list of attackers of the effect */
-				if (!(eff in effects[victim]))
-					effects[victim][eff] = [];
-				effects[victim][eff].push(key);
+				/* add the player as source for the given effect */
+				if (!(effect in applied))
+					(applied as any)[effect] = [];
+				((applied as any)[effect] as string[]).push(name);
 			}
 		}
 
-		/* iterate over all players again and apply the protections, exposures */
-		for (const key in this.players) {
-			let player = this.players[key];
+		/* iterate over all players again and reset them, apply the protections, exposures, fail,
+		*	zero, min, max, and clear swaps for players who failed to answer correctly */
+		for (const name in this.players) {
+			const player = this.players[name];
+
+			/* reset the player for the effect application */
+			player.applied = {};
+			player.payout = player.confidence;
+			player.delta = 0;
+			player.ready = false;
 
 			/* apply the exposure-effect */
 			if (player.effects.expose != null)
@@ -100,19 +119,18 @@ class GameState {
 			/* apply the protect-effect */
 			if (player.effects.protect != null) {
 				player.applied.protect = 'True';
-				delete effects[key];
+				delete appliedTo[name];
+				continue;
 			}
-		}
 
-		/* apply the failed effects, and zero, and min/max, and clear
-		*	any swaps for players who failed to answer correctly */
-		for (const key in effects) {
-			let applied = effects[key];
-			let player = this.players[key];
+			/* check if any effects are applied */
+			const applied = appliedTo[name];
+			if (applied == null)
+				continue;
 
 			/* apply the failed effect */
-			if ('fail' in applied) {
-				player.applied.fail = applied.fail;
+			if (applied.fail != null) {
+				player.applied.fail = applied.fail.join(", ");
 				player.correct = false;
 			}
 
@@ -121,137 +139,124 @@ class GameState {
 				delete applied.swap;
 
 			/* apply the zero effect */
-			if ('zero' in applied) {
-				player.applied.zero = applied.zero;
-				confidence[key] = 0;
+			if (applied.zero != null) {
+				player.applied.zero = applied.zero.join(", ");
+				player.payout = 0;
 				continue;
 			}
 
-			/* apply the min/max effects (most frequently used is applied is used) */
-			let has = [];
-			if ('min' in applied)
-				has.push(['min', applied.min]);
-			if ('max' in applied)
-				has.push(['max', applied.max]);
-			has.sort((a, b) => b[1].length - a[1].length);
-
-			/* check if the result is trivial */
-			if (has.length == 0)
+			/* apply the min/max effects (most frequently used is applied and otherwise randomly chosen) */
+			if (applied.min == null && applied.max == null)
 				continue;
-			let index = 0;
-
-			/* pick the most frequent effect or randomly between all */
-			if (has.length > 1 && has[0][1].length == has[1][1].length) {
-				let count = 1;
-				while (count < has.length && has[count][1].length == has[0][1].length)
-					++count;
-				index = Math.floor(Math.random() * count);
+			if (applied.min != null && applied.max != null) {
+				if (applied.min.length > applied.max.length || (applied.min.length == applied.max.length && Math.random() <= 0.5))
+					delete applied.max;
+				else
+					delete applied.min;
 			}
 
 			/* apply the chosen effect */
-			player.applied[has[index][0]] = has[index][1];
-			confidence[key] = (has[index][0] == 'min' ? -1 : 3);
+			if (applied.min != null)
+				player.applied.min = applied.min.join(", ");
+			if (applied.max != null)
+				player.applied.max = applied.max.join(", ");
+			player.payout = (player.applied.max != null ? 3 : -1);
 		}
 
 		/* compute the points each player will earn and apply double-or-nothing */
-		let points: Rector<string, number> = {};
-		for (const key in this.players) {
-			let player = this.players[key];
+		for (const name in this.players) {
+			const player = this.players[name];
 
 			/* apply the double-or-nothing effect */
 			if (player.effects.double != null) {
 				player.applied.double = 'True';
-				points[key] = (player.correct ? player.score : -player.score);
+				player.delta = (player.correct ? player.score : -player.score);
 			}
 			else
-				points[key] = (player.correct ? confidence[key] : -confidence[key]);
+				player.delta = (player.correct ? player.payout : -player.payout);
 		}
 
 		/* apply the steal randomly (ensure no steal-chains are possible) */
-		let stealKeys = Object.keys(effects);
-		while (stealKeys.length > 0) {
+		const stealFrom = Object.keys(appliedTo);
+		while (stealFrom.length > 0) {
 			/* pick the next entry to process and remove the index from the open list */
-			let index = Math.floor(Math.random() * stealKeys.length);
-			let key = stealKeys[index];
-			stealKeys.splice(index, 1);
+			const index = Math.floor(Math.random() * stealFrom.length);
+			const name = stealFrom[index];
+			stealFrom.splice(index, 1);
 
 			/* check if the key can be removed, as no steals are registered for it */
-			if (!('steal' in effects[key]))
+			if (appliedTo[name].steal == null)
 				continue;
-			let steals = effects[key].steal;
-			delete effects[key].steal;
+			const thieves = appliedTo[name].steal;
+			delete appliedTo[name].steal;
 
 			/* select the thief and apply him */
-			let thief = steals[Math.floor(Math.random() * steals.length)];
-			this.players[key].applied.steal = thief;
+			const thief = thieves[Math.floor(Math.random() * thieves.length)];
+			this.players[name].applied.steal = thief;
 
-			/* check if the thief and player stolea from each other */
-			if ((thief in effects) && ('steal' in effects[thief]) && effects[thief].steal.includes(key))
-				this.players[thief].applied.steal = key;
+			/* check if the thief and player stole from each other */
+			if ((thief in appliedTo) && appliedTo[thief].steal != null && appliedTo[thief].steal.includes(name))
+				this.players[thief].applied.steal = name;
 
 			/* steal the points */
 			else {
-				points[thief] += points[key];
-				points[key] = 0;
+				this.players[thief].delta += this.players[name].delta;
+				this.players[name].delta = 0;
 			}
 
 			/* remove the thief to prevent double-steal */
-			if (thief in effects)
-				delete effects[thief].steal;
+			if (thief in appliedTo)
+				delete appliedTo[thief].steal;
 		}
 
 		/* compute the overall new points */
-		for (const key in this.players)
-			points[key] = Math.max(0, this.players[key].score + points[key]);
+		for (const name in this.players)
+			this.players[name].score = Math.max(0, this.players[name].score + this.players[name].delta);
 
 		/* apply the swaps randomly (ensure no swap-chains are possible) */
-		let swapKeys = Object.keys(effects);
-		while (swapKeys.length > 0) {
+		const swapWith = Object.keys(appliedTo);
+		while (swapWith.length > 0) {
 			/* pick the next entry to process and remove the index from the open list */
-			let index = Math.floor(Math.random() * swapKeys.length);
-			let key = swapKeys[index];
-			swapKeys.splice(index, 1);
+			const index = Math.floor(Math.random() * swapWith.length);
+			const name = swapWith[index];
+			swapWith.splice(index, 1);
 
 			/* check if the key can be removed, as no swaps are registered for it */
-			if (!('swap' in effects[key]))
+			if (appliedTo[name].swap == null)
 				continue;
-			let swaps = effects[key].swap;
-			delete effects[key].swap;
+			const swaps = appliedTo[name].swap;
+			delete appliedTo[name].swap;
 
-			/* select the thief and apply him */
-			let thief = swaps[Math.floor(Math.random() * swaps.length)];
-			this.players[key].applied.swap = thief;
+			/* select the other player and apply him */
+			const other = swaps[Math.floor(Math.random() * swaps.length)];
+			this.players[name].applied.swap = other;
 
 			/* check if the thief and player swapped each other */
-			if ((thief in effects) && ('swap' in effects[thief]) && effects[thief].swap.includes(key))
-				this.players[thief].applied.swap = key;
+			if ((other in appliedTo) && appliedTo[other].swap != null && appliedTo[other].swap.includes(name))
+				this.players[other].applied.swap = name;
 
 			/* swap the points */
 			else {
-				let temp = points[key];
-				points[key] = points[thief];
-				points[thief] = temp;
+				const namePoints = this.players[name].score;
+				const otherPoints = this.players[other].score;
 
+				this.players[name].score = otherPoints;
+				this.players[name].delta += (otherPoints - namePoints);
+
+
+				this.players[other].score = namePoints;
+				this.players[other].delta += (namePoints - otherPoints);
 			}
 
-			/* remove the thief to prevent double-swaps */
-			if (thief in effects)
-				delete effects[thief].swap;
-		}
-
-		/* write the points out and update the delta */
-		for (const key in this.players) {
-			let player = this.players[key];
-
-			player.delta = (points[key] - player.score);
-			player.score = points[key];
-			player.ready = false;
+			/* remove the other person to prevent double-swaps */
+			if (other in appliedTo)
+				delete appliedTo[other].swap;
 		}
 	}
 	public advanceStage(): void {
 		/* check if all players are valid */
-		for (const key in this.players) {
-			if (!this.players[key].ready)
+		for (const name in this.players) {
+			if (!this.players[name].ready)
 				return;
 		}
 		if (Object.keys(this.players).length < 2)
@@ -394,7 +399,7 @@ export class Application implements libCommon.AppInterface {
 		}
 		let session = this.sessions.get(id)!;
 
-		/* register the listener */
+		/* register the listener and advance the initial stage */
 		session.ws.add(ws);
 		client.log(`Websocket connected`);
 

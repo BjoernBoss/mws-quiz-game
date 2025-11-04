@@ -110,8 +110,12 @@ _game.applyState = function (state) {
 		}
 
 		/* add the confidence */
-		if (_game.state.phase == 'resolved')
-			makeNext().innerText = `Confidence: ${player.confidence}`;
+		if (_game.state.phase == 'resolved') {
+			let text = `Confidence: ${player.payout}`;
+			if (player.confidence != player.payout)
+				text += ` (Wanted: ${player.confidence})`;
+			makeNext().innerText = text;
+		}
 
 		/* add the delta */
 		if (_game.state.phase == 'resolved')

@@ -260,10 +260,10 @@ _game.applyHeaderAndFooter = function () {
 	/* update the points-delta */
 	if (_game.state.phase == 'resolved') {
 		_game.htmlDelta.classList.remove('hidden');
-		if (_game.self.delta < 0)
-			_game.htmlDelta.innerText = `Points: ${_game.self.delta}`;
-		else
-			_game.htmlDelta.innerText = `Points: +${_game.self.delta}`;
+		let text = (_game.self.delta < 0 ? `Points: ${_game.self.delta}` : `Points: +${_game.self.delta}`);
+		if (_game.self.payout != _game.self.confidence)
+			text += ` | Actual Confidence: ${_game.self.payout}`;
+		_game.htmlDelta.innerText = text;
 	}
 	else
 		_game.htmlDelta.classList.add('hidden');
@@ -328,8 +328,12 @@ _game.applyScore = function () {
 		}
 
 		/* add the confidence */
-		if (_game.state.phase == 'resolved')
-			makeNext().innerText = `Confidence: ${player.confidence}`;
+		if (_game.state.phase == 'resolved') {
+			let text = `Confidence: ${player.payout}`;
+			if (player.confidence != player.payout)
+				text += ` (Wanted: ${player.confidence})`;
+			makeNext().innerText = text;
+		}
 
 		/* add the delta */
 		if (_game.state.phase == 'resolved')

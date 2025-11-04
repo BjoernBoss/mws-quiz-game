@@ -354,14 +354,14 @@ class Session {
 	}
 };
 
-export class Application implements libCommon.AppInterface {
+export class QuizGame implements libCommon.ModuleInterface {
 	private fileStatic: (path: string) => string;
 	private jsonQuestions: Question[];
 	private sessions: Map<string, Session>;
 
 	constructor() {
-		this.fileStatic = libLocation.MakeAppPath(import.meta.url, '/static');
-		const questionPath = libLocation.MakeAppPath(import.meta.url)('./categorized-questions.json');
+		this.fileStatic = libLocation.MakeSelfPath(import.meta.url, '/static');
+		const questionPath = libLocation.MakeSelfPath(import.meta.url)('./categorized-questions.json');
 		this.jsonQuestions = JSON.parse(libFs.readFileSync(questionPath, 'utf8'));
 		this.sessions = new Map<string, Session>()
 	}
@@ -441,7 +441,7 @@ export class Application implements libCommon.AppInterface {
 		/* check if a new session has been requested and create it */
 		if (client.path == '/new') {
 			let id = this.setupSession();
-			client.respondRedirect(`${client.basepath}/session` + `?id=${id}`);
+			client.respondRedirect(`${client.basepath}/session?id=${id}`);
 			return;
 		}
 

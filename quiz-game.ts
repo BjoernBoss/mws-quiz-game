@@ -6,7 +6,6 @@ import * as libLog from "core/log.js";
 import * as libLocation from "core/location.js";
 import * as libFs from "fs";
 import * as libCrypto from "crypto";
-import * as libWs from "ws";
 
 const sessionTimeoutMinutes = 20;
 
@@ -318,12 +317,12 @@ class GameState {
 class Session {
 	public timeout: NodeJS.Timeout | null;
 	public dead: number;
-	public ws: Set<libWs.WebSocket>;
+	public ws: Set<libClient.ClientSocket>;
 	public state: GameState;
 
 	constructor(questions: Question[]) {
 		this.state = new GameState(questions);
-		this.ws = new Set<libWs.WebSocket>();
+		this.ws = new Set<libClient.ClientSocket>();
 		this.dead = 0;
 		this.timeout = null;
 	}
@@ -390,22 +389,22 @@ export class QuizGame implements libCommon.ModuleInterface {
 		}, 60 * 1000);
 		return id;
 	}
-	private acceptWebSocket(client: libClient.HttpUpgrade, ws: libWs.WebSocket, id: string): void {
+	private acceptWebSocket(client: libClient.ClientSocket, id: string): void {
 		/* check if the session exists */
 		if (!this.sessions.has(id)) {
 			libLog.Log(`WebSocket connection for unknown session: ${id}`);
-			ws.send(JSON.stringify({ cmd: 'unknown-session' }));
-			ws.close();
+			client.send(JSON.stringify({ cmd: 'unknown-session' }));
+			client.close();
 			return;
 		}
 		let session = this.sessions.get(id)!;
 
 		/* register the listener and advance the initial stage */
-		session.ws.add(ws);
+		session.ws.add(client);
 		client.log(`Websocket connected`);
 
 		/* register the callbacks */
-		ws.on('message', function (msg) {
+		client.ondata = function (msg) {
 			try {
 				let parsed = JSON.parse(msg.toString('utf-8'));
 
@@ -413,19 +412,19 @@ export class QuizGame implements libCommon.ModuleInterface {
 				let response = session.handle(parsed);
 				if (response != null) {
 					client.log(`Received: ${parsed.cmd} -> ${response.cmd}`);
-					ws.send(JSON.stringify(response));
+					client.send(JSON.stringify(response));
 				}
 				else
 					client.log(`Received: ${parsed.cmd}`);
 			} catch (err) {
 				client.log(`Exception while message: [${err}]`);
-				ws.close();
+				client.close();
 			}
-		});
-		ws.on('close', function () {
-			session.ws.delete(ws);
+		};
+		client.onclose = function () {
+			session.ws.delete(client);
 			client.log(`Websocket disconnected`);
-		});
+		};
 	}
 
 	public request(client: libClient.HttpRequest): void {
@@ -474,7 +473,7 @@ export class QuizGame implements libCommon.ModuleInterface {
 
 		/* extract the id and try to accept the socket */
 		let id = client.path.substring(4);
-		if (client.tryAcceptWebSocket((ws) => this.acceptWebSocket(client, ws, id)))
+		if (client.tryAcceptWebSocket((ws) => this.acceptWebSocket(ws, id)))
 			return;
 		client.log(`Invalid request for web-socket point for session: [${id}]`);
 		client.respondNotFound();

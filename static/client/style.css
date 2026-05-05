@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
-html,
-body {
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
+.main {
 	margin: 0;
 	height: 100%;
 	user-select: none;
@@ -149,16 +148,30 @@ body {
 }
 
 .login {
-	width: 100%;
 	height: 100%;
 	background-color: #c0c0c0;
+}
+
+.login .view {
+	width: 100%;
+	height: 100%;
 	display: flex;
 	justify-content: center;
-	align-items: center;
+	overflow: hidden auto;
+}
+
+.login .padding {
+	width: 100%;
+	margin: auto;
+	padding: 60px;
+	display: flex;
+	justify-content: center;
 }
 
 .login .content {
-	width: 80%;
+	width: 100%;
+	min-width: 300px;
+	max-width: 850px;
 	background-color: white;
 	border-radius: 1em;
 	border-width: 0.2em;

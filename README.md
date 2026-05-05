@@ -4,20 +4,47 @@
 
 This repository is designed to be used with the [`MWS-Base`](https://github.com/BjoernBoss/mws-base.git).
 
-It provides an interactive way play a quiz-game, consisting of about 190 questions, together.
-It allows this by making use of `WebSockets`.
+It provides an interactive way to play a quiz-game together, consisting of about 190 questions.
 The quiz-game allows players to use fun special effects on other players, such as taking away their points, or teasing them in other ways.
 
 All active sessions are managed by the created `QuizGame` object. Sharing this object across multiple listened ports will therefore ensure each port shares a common player base.
 
-## Using the Module
-To use this module, setup the `mws-base`. Then simply clone this repository into the modules directory:
+The game differentiates players by name. Logging in with the same name will result in two players controlling the same user.
 
-	$ git clone https://github.com/BjoernBoss/mws-quiz-game.git modules/quiz-game
+## Setup
+Clone into the modules directory of an existing MWS-Base installation:
 
-Afterwards, transpile the entire server application, and construct this module in the `setup.js Run` method as:
+    $ git clone https://github.com/BjoernBoss/mws-quiz-game.git modules/quiz-game
+
+Register the module in `modules/setup.js`:
 
 ```JavaScript
-const m = await import("./quiz-game/quiz-game.js");
-server.listenHttp(93, new m.QuizGame(), null);
+import * as libInterface from "core/interface.js";
+
+export async function Run(server) {
+    try {
+        const quizGame = await import("quiz-game/quiz-game.js");
+        const dispatch = new libInterface.DispatchModule({
+            '/quiz-game': new quizGame.QuizGame(),
+        });
+        server.listenHttp(8080, dispatch, (host) => host == 'localhost');
+    } catch (e) {
+        throw new Error(`Failed to load module: ${e.message}`);
+    }
+}
 ```
+
+Then just build and run the server as usual.
+
+## HTTP Endpoints
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Create a new game session |
+| GET | `/session?id={id}` | Page providing the player and scoreboard pages |
+| GET | `/client?id={id}` | Play as one client in the game |
+| GET | `/score?id={id}` | View the score and other information for the game |
+| GET | `/**/*.css`, `/**/*.js` | Static assets |
+| WebSocket | `/ws/{id}` | Join a game session |
+
+## WebSocket Protocol
+The game is built on trust, every WebSocket connection just publishes updates of its player state, which are then pushed to all other clients, where necessary.

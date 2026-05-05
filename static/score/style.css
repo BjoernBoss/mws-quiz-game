@@ -1,18 +1,12 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
-html,
-body {
-	margin: 0;
-	height: 100%;
-	user-select: none;
-}
-
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 .core {
 	overflow: clip;
 	background-color: rgb(212, 212, 212);
 	display: flex;
 	flex-flow: column;
 	height: 100%;
+	user-select: none;
 }
 
 .header {

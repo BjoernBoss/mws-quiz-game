@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 let _game = {};
+
+const COOKIE_NAME_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const GAME_NAME_REGEX = /^[a-zA-Z0-9-_]+$/
 
 window.onload = function () {
 	/* setup the overall state */
@@ -59,6 +62,7 @@ window.onload = function () {
 	_game.empty = {
 		score: 0,
 		ready: false,
+		payout: 0,
 		confidence: 1,
 		choice: -1,
 		correct: false,
@@ -123,7 +127,7 @@ window.onload = function () {
 	_game.htmlToggleBoard = document.getElementById('toggle-board');
 
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`/quiz-game/ws/${_game.sessionId}`);
+	_game.sock = new SyncSocket(`./ws/${_game.sessionId}`);
 	_game.sock.onfailed = (m) => _game.failed(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = null;
@@ -132,7 +136,7 @@ window.onload = function () {
 	let lastName = document.cookie.split('; ').find((v) => v.startsWith('quiz-game-last-name='))?.split('=')[1];
 	if (lastName != null)
 		_game.htmlName.value = lastName;
-};
+}
 
 _game.selfChanged = function () {
 	_game.applyState(null);
@@ -192,7 +196,7 @@ _game.applyState = function (state) {
 	/* setup the category/effect setup screen */
 	else
 		_game.applySetup();
-};
+}
 _game.setupScramble = function () {
 	if (_game.lastScramble == _game.state.question.text)
 		return;
@@ -215,7 +219,7 @@ _game.setupScramble = function () {
 		indices.splice(index, 1);
 		++next;
 	}
-};
+}
 _game.canEffect = function (name, full) {
 	if (full && (_game.self == null || _game.self.ready || _game.state.phase != 'category'))
 		return false;
@@ -224,12 +228,12 @@ _game.canEffect = function (name, full) {
 	if (_game.self.effects[name] != null)
 		return false;
 	return true;
-};
+}
 _game.doEffect = function (name, value) {
 	_game.self.last[name] = _game.state.round;
 	_game.self.effects[name] = value;
 	_game.selfChanged();
-};
+}
 
 /* applying-state functions */
 _game.applyHeaderAndFooter = function () {
@@ -281,7 +285,7 @@ _game.applyHeaderAndFooter = function () {
 			++readyCount;
 	}
 	_game.htmlReady.children[0].children[0].innerText = `Ready (${readyCount} / ${_game.totalPlayerCount})`;
-};
+}
 _game.applyScore = function () {
 	_game.screen('score');
 	_game.htmlToggleBoard.innerText = 'Return to Game';
@@ -353,7 +357,7 @@ _game.applyScore = function () {
 	/* remove the remaining children */
 	while (_game.htmlScoreContent.children.length > list.length)
 		_game.htmlScoreContent.lastChild.remove();
-};
+}
 _game.applySelection = function () {
 	_game.screen('select');
 	_game.htmlSelectText.innerText = _game.selectDescription;
@@ -392,14 +396,14 @@ _game.applySelection = function () {
 	/* remove the remaining children */
 	while (_game.htmlSelectContent.children.length > 2 + list.length)
 		_game.htmlSelectContent.lastChild.remove();
-};
+}
 _game.applySplashScreen = function () {
 	_game.screen('splash');
 	if (_game.state.phase == 'start')
 		_game.htmlSplashMessage.innerText = 'Ready up to start playing!';
 	else
 		_game.htmlSplashMessage.innerText = 'Game Over!';
-};
+}
 _game.applyQuestion = function () {
 	_game.screen('game');
 
@@ -465,7 +469,7 @@ _game.applyQuestion = function () {
 	/* remove the remaining children */
 	while (_game.htmlGameContent.children.length > 1 + _game.state.question.options.length)
 		_game.htmlGameContent.lastChild.remove();
-};
+}
 _game.applySetup = function () {
 	_game.screen('setup');
 
@@ -485,7 +489,7 @@ _game.applySetup = function () {
 	/* update the effect buttons */
 	for (const key in _game.effects)
 		_game._applyEffect(key);
-};
+}
 _game._applyEffect = function (name) {
 	let can = _game.canEffect(name, false);
 	let html = _game.effects[name].html;
@@ -501,7 +505,7 @@ _game._applyEffect = function (name) {
 		html.children[0].children[2].innerText = `Timed Out for ${_game.effects[name].timeout} Rounds`;
 	else
 		html.children[0].children[2].innerText = `Available in ${_game.self.last[name] + _game.effects[name].timeout - _game.state.round + 1} Rounds`;
-};
+}
 
 /* called from/for html */
 _game.screen = function (name) {
@@ -537,11 +541,13 @@ _game.failed = function (msg) {
 	_game.selectDescription = '';
 	_game.viewScore = false;
 	_game.name = '';
-};
+}
 _game.login = function () {
+	const name = _game.htmlName.value.trim();
+
 	/* validate the name */
-	if (_game.htmlName.value == '') {
-		_game.failed('Please Enter a Name');
+	if (!name.match(GAME_NAME_REGEX)) {
+		_game.failed('Please Enter a Valid Name');
 		return;
 	}
 
@@ -563,32 +569,32 @@ _game.login = function () {
 	}
 
 	/* extract the parameter and sync the game up */
-	_game.name = _game.htmlName.value.trim();
+	_game.name = name;
 	_game.sock.fetch();
 
 	/* write the last name as a cookie out (lifetime = 24hrs) */
-	document.cookie = `quiz-game-last-name=${_game.name}; expires=${new Date(Date.now() + 24 * 60 * 60 * 1000).toUTCString()};`;
-};
+	document.cookie = `quiz-game-last-name=${_game.name}; expires=${new Date(Date.now() + COOKIE_NAME_LIFETIME_MS).toUTCString()};`;
+}
 _game.ready = function () {
 	if (_game.self == null || _game.self.ready || _game.state.phase == 'done' || _game.totalPlayerCount < 2)
 		return;
 
 	_game.self.ready = true;
 	_game.selfChanged();
-};
+}
 _game.toggleScore = function () {
 	if (_game.self == null)
 		return;
 	_game.viewScore = !_game.viewScore;
 	_game.applyState(null);
-};
+}
 _game.slide = function (v) {
 	if (_game.self == null || _game.self.ready || _game.state.phase != 'category')
 		return;
 
 	_game.self.confidence = Number(v);
 	_game.selfChanged();
-};
+}
 _game.choose = function (v) {
 	if (_game.self == null || _game.self.ready || _game.state.phase != 'answer')
 		return;
@@ -596,7 +602,7 @@ _game.choose = function (v) {
 	_game.self.choice = _game.fromScramble[v];
 	_game.self.correct = (_game.self.choice == _game.state.question.correct);
 	_game.selfChanged();
-};
+}
 _game.activate = function (name) {
 	if (!_game.canEffect(name, true))
 		return;
@@ -611,13 +617,13 @@ _game.activate = function (name) {
 			_game.doEffect(name, v);
 	};
 	_game.applyState(null);
-};
+}
 _game.pick = function (v) {
 	/* select-callback will automatically apply state */
 	_game.selectDescription = '';
 	_game.selectCallback(v);
 	_game.applyState(null);
-};
+}
 _game.remove = function () {
 	if (!_game.sock.connected()) {
 		_game.failed('Network issue while removing player');
@@ -627,4 +633,4 @@ _game.remove = function () {
 		_game.sock.sync(_game.name, null);
 		_game.failed('Player has been removed');
 	}
-};
+}

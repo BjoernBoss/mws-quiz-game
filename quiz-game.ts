@@ -1,31 +1,39 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
-import * as libCommon from "core/common.js";
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
+import * as libInterface from "core/interface.js";
 import * as libClient from "core/client.js";
-import * as libLog from "core/log.js";
+import * as libRequest from "core/request.js";
 import * as libLocation from "core/location.js";
+import * as libLog from "core/log.js";
+import * as libBuilder from "core/builder.js";
+import * as libCache from "core/cache.js";
 import * as libFs from "fs";
 import * as libCrypto from "crypto";
 
-const sessionTimeoutMinutes = 20;
+const MODULE_NAME = 'quiz-game';
+const SESSION_TIMEOUT_MINUTES = 20;
+const SESSION_TIMER_CHECK_MINUTE = 60 * 1000;
+const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]+$/
+
+const logger = libLog.Logger(MODULE_NAME);
 
 interface Question {
 	text: string;
 	options: string[4];
 	correct: number;
 	category: string;
-};
+}
 interface GameEffects<T> {
-	expose?: T;
-	double?: T;
-	protect?: T;
-	fail?: T;
-	swap?: T;
-	zero?: T;
-	min?: T;
-	max?: T;
-	steal?: T;
-};
+	expose: T;
+	double: T;
+	protect: T;
+	fail: T;
+	swap: T;
+	zero: T;
+	min: T;
+	max: T;
+	steal: T;
+}
 interface PlayerState {
 	ready: boolean;
 	confidence: number;
@@ -34,16 +42,17 @@ interface PlayerState {
 	correct: boolean;
 	delta: number;
 	score: number;
-	effects: GameEffects<string>;
-	applied: GameEffects<string>;
-};
+	effects: GameEffects<string | null>;
+	applied: GameEffects<string | null>;
+	last: GameEffects<number>;
+}
 enum GamePhase {
 	start = 'start',
 	category = 'category',
 	answer = 'answer',
 	resolved = 'resolved',
 	done = 'done'
-};
+}
 
 class GameState {
 	private players: Record<string, PlayerState>;
@@ -73,30 +82,31 @@ class GameState {
 			player.confidence = 1;
 			player.choice = -1;
 			player.correct = false;
-			player.effects = {};
-			player.applied = {};
+			player.effects = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
+			player.applied = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
 		}
 	}
 	private applyEffects(): void {
-		const appliedTo: Record<string, GameEffects<string[]>> = {};
+		const appliedTo: Record<string, GameEffects<string[] | null>> = {};
 
 		/* collect the list of players who applied each effect to each other */
+		const targetEffects: (keyof GameEffects<unknown>)[] = ['fail', 'swap', 'zero', 'min', 'max', 'steal'];
 		for (const name in this.players) {
 			const player = this.players[name];
-			for (const effect of ['fail', 'swap', 'zero', 'min', 'max', 'steal']) {
-				const victim = ((player.effects as any)[effect] as (string | undefined));
+			for (const effect of targetEffects) {
+				const victim = player.effects[effect];
 				if (victim == null)
 					continue;
 
 				/* check if the victim exists and add it the the inverse-map */
 				if (!(victim in appliedTo))
-					appliedTo[victim] = {};
+					appliedTo[victim] = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
 				const applied = appliedTo[victim];
 
 				/* add the player as source for the given effect */
-				if (!(effect in applied))
-					(applied as any)[effect] = [];
-				((applied as any)[effect] as string[]).push(name);
+				if (applied[effect] == null)
+					applied[effect] = [];
+				applied[effect]!.push(name);
 			}
 		}
 
@@ -106,7 +116,7 @@ class GameState {
 			const player = this.players[name];
 
 			/* reset the player for the effect application */
-			player.applied = {};
+			player.applied = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
 			player.payout = player.confidence;
 			player.delta = 0;
 			player.ready = false;
@@ -135,7 +145,7 @@ class GameState {
 
 			/* clear the swap effects */
 			if (!player.correct)
-				delete applied.swap;
+				applied.swap = null;
 
 			/* apply the zero effect */
 			if (applied.zero != null) {
@@ -149,9 +159,9 @@ class GameState {
 				continue;
 			if (applied.min != null && applied.max != null) {
 				if (applied.min.length > applied.max.length || (applied.min.length == applied.max.length && Math.random() <= 0.5))
-					delete applied.max;
+					applied.max = null;
 				else
-					delete applied.min;
+					applied.min = null;
 			}
 
 			/* apply the chosen effect */
@@ -187,7 +197,7 @@ class GameState {
 			if (appliedTo[name].steal == null)
 				continue;
 			const thieves = appliedTo[name].steal;
-			delete appliedTo[name].steal;
+			appliedTo[name].steal = null;
 
 			/* select the thief and apply him */
 			const thief = thieves[Math.floor(Math.random() * thieves.length)];
@@ -205,7 +215,7 @@ class GameState {
 
 			/* remove the thief to prevent double-steal */
 			if (thief in appliedTo)
-				delete appliedTo[thief].steal;
+				appliedTo[thief].steal = null;
 		}
 
 		/* compute the overall new points */
@@ -224,7 +234,7 @@ class GameState {
 			if (appliedTo[name].swap == null)
 				continue;
 			const swaps = appliedTo[name].swap;
-			delete appliedTo[name].swap;
+			appliedTo[name].swap = null;
 
 			/* select the other player and apply him */
 			const other = swaps[Math.floor(Math.random() * swaps.length)];
@@ -249,7 +259,7 @@ class GameState {
 
 			/* remove the other person to prevent double-swaps */
 			if (other in appliedTo)
-				delete appliedTo[other].swap;
+				appliedTo[other].swap = null;
 		}
 	}
 	public advanceStage(): void {
@@ -306,14 +316,77 @@ class GameState {
 			}
 		};
 	}
-	public updatePlayer(name: string, state: PlayerState | null): void {
-		if (state == null)
+	public updatePlayer(name: string, state: any): boolean {
+		if (!name.match(VALID_NAME_REGEX))
+			return false;
+
+		if (state === null)
 			delete this.players[name];
-		else
-			this.players[name] = state;
+		else {
+			if (typeof state.ready != 'boolean' || typeof state.correct != 'boolean')
+				return false;
+			if (typeof state.confidence != 'number' || typeof state.payout != 'number' || typeof state.choice != 'number')
+				return false;
+			if (typeof state.delta != 'number' || typeof state.score != 'number')
+				return false;
+			if (typeof state.effects != 'object' || typeof state.applied != 'object')
+				return false;
+			for (const name of ['expose', 'double', 'protect', 'fail', 'swap', 'zero', 'min', 'max', 'steal']) {
+				if (typeof state.effects[name] != 'string' && state.effects[name] != null)
+					return false;
+				if (typeof state.applied[name] != 'string' && state.applied[name] != null)
+					return false;
+				if (typeof state.last[name] != 'number')
+					return false;
+			}
+
+			this.players[name] = {
+				ready: state.ready,
+				correct: state.correct,
+				confidence: state.confidence,
+				payout: state.payout,
+				choice: state.choice,
+				delta: state.delta,
+				score: state.score,
+				effects: {
+					expose: state.effects.expose,
+					double: state.effects.double,
+					protect: state.effects.protect,
+					fail: state.effects.fail,
+					swap: state.effects.swap,
+					zero: state.effects.zero,
+					min: state.effects.min,
+					max: state.effects.max,
+					steal: state.effects.steal
+				},
+				applied: {
+					expose: state.applied.expose,
+					double: state.applied.double,
+					protect: state.applied.protect,
+					fail: state.applied.fail,
+					swap: state.applied.swap,
+					zero: state.applied.zero,
+					min: state.applied.min,
+					max: state.applied.max,
+					steal: state.applied.steal
+				},
+				last: {
+					expose: state.last.expose,
+					double: state.last.double,
+					protect: state.last.protect,
+					fail: state.last.fail,
+					swap: state.last.swap,
+					zero: state.last.zero,
+					min: state.last.min,
+					max: state.last.max,
+					steal: state.last.steal
+				}
+			};
+		}
 		this.advanceStage();
+		return true;
 	}
-};
+}
 class Session {
 	public timeout: NodeJS.Timeout | null;
 	public dead: number;
@@ -344,21 +417,22 @@ class Session {
 			case 'update':
 				if (typeof (msg.name) != 'string')
 					return { cmd: 'malformed' };
-				this.state.updatePlayer(msg.name, msg.value);
+				if (!this.state.updatePlayer(msg.name, msg.value))
+					return { cmd: 'malformed' };
 				this.sync();
 				return null;
 			default:
 				return { cmd: 'malformed' };
 		}
 	}
-};
+}
 
-export class QuizGame implements libCommon.ModuleInterface {
+export class QuizGame implements libInterface.ModuleInterface {
 	private fileStatic: (path: string) => string;
 	private jsonQuestions: Question[];
 	private sessions: Map<string, Session>;
 
-	public name: string = 'quiz-game';
+	public name: string = MODULE_NAME;
 	constructor() {
 		this.fileStatic = libLocation.MakeSelfPath(import.meta.url, '/static');
 		const questionPath = libLocation.MakeSelfPath(import.meta.url)('./categorized-questions.json');
@@ -366,16 +440,16 @@ export class QuizGame implements libCommon.ModuleInterface {
 		this.sessions = new Map<string, Session>()
 	}
 
-	private setupSession() {
+	private setupSession(): string {
 		let id = libCrypto.randomUUID();
-		libLog.Log(`Session created: ${id}`);
+		logger.log(`Session created: ${id}`);
 		let session = new Session(this.jsonQuestions);
 		this.sessions.set(id, session);
 
 		/* setup the session-timeout checker (only considered alive when the state changes) */
 		let that = this;
 		session.timeout = setInterval(function () {
-			if (session.dead++ < sessionTimeoutMinutes + 1)
+			if (session.dead++ < SESSION_TIMEOUT_MINUTES + 1)
 				return;
 
 			/* close all connections */
@@ -385,14 +459,14 @@ export class QuizGame implements libCommon.ModuleInterface {
 			that.sessions.delete(id);
 			if (session.timeout != null)
 				clearInterval(session.timeout);
-			libLog.Log(`Session deleted: ${id}`);
-		}, 60 * 1000);
+			logger.log(`Session deleted: ${id}`);
+		}, SESSION_TIMER_CHECK_MINUTE);
 		return id;
 	}
-	private acceptWebSocket(client: libClient.ClientSocket, id: string): void {
+	private async acceptWebSocket(client: libClient.ClientSocket, id: string): Promise<void> {
 		/* check if the session exists */
 		if (!this.sessions.has(id)) {
-			libLog.Log(`WebSocket connection for unknown session: ${id}`);
+			logger.log(`WebSocket connection for unknown session: ${id}`);
 			client.send(JSON.stringify({ cmd: 'unknown-session' }));
 			client.close();
 			return;
@@ -402,11 +476,21 @@ export class QuizGame implements libCommon.ModuleInterface {
 		/* register the listener and advance the initial stage */
 		session.ws.add(client);
 		client.log(`Websocket connected`);
+		const snapshot = client.snapshot();
+		let hasName = '';
 
 		/* register the callbacks */
 		client.ondata = function (msg) {
 			try {
 				let parsed = JSON.parse(msg.toString('utf-8'));
+
+				/* check if a name can be assigned to the game */
+				if (typeof parsed.name == 'string' && parsed.name != hasName) {
+					if (hasName != '')
+						client.restore(snapshot);
+					if ((hasName = parsed.name) != '')
+						client.pushLog(hasName);
+				}
 
 				/* handle the message accordingly */
 				let response = session.handle(parsed);
@@ -416,7 +500,7 @@ export class QuizGame implements libCommon.ModuleInterface {
 				}
 				else
 					client.log(`Received: ${parsed.cmd}`);
-			} catch (err) {
+			} catch (err: any) {
 				client.log(`Exception while message: [${err}]`);
 				client.close();
 			}
@@ -426,56 +510,158 @@ export class QuizGame implements libCommon.ModuleInterface {
 			client.log(`Websocket disconnected`);
 		};
 	}
+	private async fetchBody(client: libClient.HttpRequest, path: string): Promise<string | null> {
+		const fullPath = this.fileStatic(path);
 
-	public request(client: libClient.HttpRequest): void {
-		client.log(`Game handler for [${client.path}]`);
-		if (client.ensureMethod(['GET']) == null)
-			return;
-
-		/* check if its a root-request and forward it accordingly */
-		if (client.path == '/') {
-			client.tryRespondFile(this.fileStatic('base/startup.html'));
-			return;
+		const cached: libCache.Cached | null = libCache.GetActual(fullPath, true);
+		if (cached == null) {
+			client.error(`Failed to find content [${fullPath}]`);
+			client.respondFileSystemError();
+			return null;
 		}
+
+		try {
+			return (await cached.readAsync()).toString('utf-8');
+		}
+		catch (err: any) {
+			client.error(`Failed to read content [${fullPath}]: ${err.message}`);
+			client.respondFileSystemError();
+			return null;
+		}
+	}
+	private async buildStartupPage(client: libClient.HttpRequest): Promise<void> {
+		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const b = libBuilder;
+
+		const body: string | null = await this.fetchBody(client, '/base/startup.html');
+		if (body == null)
+			return;
+
+		const page = new b.HtmlPage({
+			language: 'en',
+			head: [
+				b.Meta('viewport', 'width=device-width, initial-scale=1'),
+				b.Title('Start Session!'),
+				b.LoadStyle(toPath('/common/buttons.css')),
+				b.LoadStyle(toPath('/base/style.css'))
+			],
+			body: b.Embed(body, true)
+		});
+		client.respondHtml(page, { status: libRequest.Status.Ok });
+	}
+	private async buildSessionPage(client: libClient.HttpRequest): Promise<void> {
+		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const b = libBuilder;
+
+		const body: string | null = await this.fetchBody(client, '/base/session.html');
+		if (body == null)
+			return;
+
+		const page = new b.HtmlPage({
+			language: 'en',
+			head: [
+				b.Meta('viewport', 'width=device-width, initial-scale=1'),
+				b.Title('New Session Created!'),
+				b.LoadStyle(toPath('/base/style.css'))
+			],
+			body: b.Embed(body, true)
+		});
+		client.respondHtml(page, { status: libRequest.Status.Ok });
+	}
+	private async buildClientPage(client: libClient.HttpRequest): Promise<void> {
+		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const b = libBuilder;
+
+		const body: string | null = await this.fetchBody(client, '/client/main.html');
+		if (body == null)
+			return;
+
+		const page = new b.HtmlPage({
+			language: 'en',
+			head: [
+				b.Meta('viewport', 'width=device-width, initial-scale=1'),
+				b.Title('Normal Player!'),
+				b.LoadStyle(toPath('/common/buttons.css')),
+				b.LoadStyle(toPath('/client/style.css')),
+				b.LoadScript(toPath('/common/sync-socket.js')),
+				b.LoadScript(toPath('/client/script.js'))
+			],
+			body: b.Embed(body, true)
+		});
+		client.respondHtml(page, { status: libRequest.Status.Ok });
+	}
+	private async buildScorePage(client: libClient.HttpRequest): Promise<void> {
+		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const b = libBuilder;
+
+		const body: string | null = await this.fetchBody(client, '/score/main.html');
+		if (body == null)
+			return;
+
+		const page = new b.HtmlPage({
+			language: 'en',
+			head: [
+				b.Meta('viewport', 'width=device-width, initial-scale=1'),
+				b.Title('Scoreboard!'),
+				b.LoadStyle(toPath('/score/style.css')),
+				b.LoadScript(toPath('/common/sync-socket.js')),
+				b.LoadScript(toPath('/score/script.js'))
+			],
+			body: b.Embed(body, true)
+		});
+		client.respondHtml(page, { status: libRequest.Status.Ok });
+	}
+
+	public async request(client: libClient.HttpRequest): Promise<void> {
+		client.trace(`Game handler for [${client.path}]`);
+
+		/* all endpoints only support 'getting' */
+		if (client.checkMethod('GET') == null)
+			return;
 
 		/* check if a new session has been requested and create it */
 		if (client.path == '/new') {
 			let id = this.setupSession();
-			client.respondRedirect(`${client.basepath}/session?id=${id}`);
+			client.respondSeeOther(`${client.basePath}/session?id=${id}`);
 			return;
 		}
 
-		/* check if a session-dependent page has been requested */
-		if (client.path == '/session') {
-			client.tryRespondFile(this.fileStatic('base/session.html'));
-			return
-		}
-		if (client.path == '/client') {
-			client.tryRespondFile(this.fileStatic('client/main.html'));
+		/* check if its one of the html endpoints and build them dynamically and discard any other html requests */
+		if (client.path == '/')
+			return this.buildStartupPage(client);
+		if (client.path == '/session')
+			return this.buildSessionPage(client);
+		if (client.path == '/client')
+			return this.buildClientPage(client);
+		if (client.path == '/score')
+			return this.buildScorePage(client);
+		if (client.path.toLowerCase().endsWith('.html'))
 			return;
-		}
-		if (client.path == '/score') {
-			client.tryRespondFile(this.fileStatic('score/main.html'));
-			return;
-		}
 
-		/* respond to the request by trying to server the file */
-		client.tryRespondFile(this.fileStatic(client.path));
+		/* respond to the request by trying to serve the file (all files are considered stable) */
+		await client.tryRespondFile(this.fileStatic(client.path), true);
 	}
-	public upgrade(client: libClient.HttpUpgrade): void {
-		client.log(`Game handler for [${client.path}]`);
+	public async upgrade(client: libClient.HttpUpgrade): Promise<void> {
+		client.trace(`Game handler for [${client.path}]`);
 
 		/* check if the websocket has been requested */
-		if (!client.path.startsWith('/ws/')) {
-			client.respondNotFound();
+		if (!client.path.startsWith('/ws/'))
 			return;
-		}
 
-		/* extract the id and try to accept the socket */
+		/* extract the id and try to accept the socket (return with not-found as the entire endpoint is owned) */
 		let id = client.path.substring(4);
 		if (client.tryAcceptWebSocket((ws) => this.acceptWebSocket(ws, id)))
 			return;
-		client.log(`Invalid request for web-socket point for session: [${id}]`);
+		client.error(`Invalid request for web-socket point for session: [${id}]`);
 		client.respondNotFound();
 	}
-};
+	public async stop(): Promise<void> {
+		for (const [id, session] of this.sessions) {
+			if (session.timeout != null)
+				clearInterval(session.timeout);
+			session.ws.forEach((ws) => ws.close());
+			logger.log(`Session deleted: ${id}`);
+		}
+		this.sessions.clear();
+	}
+}

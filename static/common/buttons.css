@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 .button {
 	overflow: clip;
 	background-color: #ffffff;
@@ -27,6 +27,8 @@
 	justify-content: center;
 	align-items: center;
 	flex-direction: column;
+	text-decoration: none;
+	cursor: default;
 }
 
 .clickable p {
@@ -36,6 +38,7 @@
 	font-weight: bolder;
 	text-align: center;
 	padding: 0 1em;
+	text-decoration: none;
 }
 
 .clickable .sub {

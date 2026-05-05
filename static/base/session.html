@@ -1,44 +1,34 @@
 <!-- SPDX-License-Identifier: BSD-3-Clause -->
-<!-- Copyright (c) 2024-2025 Bjoern Boss Henrichsen -->
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>New Session Created!</title>
-	<link rel="stylesheet" type="text/css" href="/quiz-game/base/style.css">
-</head>
-
-<body contenteditable="false">
-	<!-- links to the interface screen -->
-	<div class="main">
-		<div class="content">
-			<p class="title">New Session Created!</p>
-			<div style="height:1.5em;"></div>
-			<p class="detail">Link for Players:</p>
-			<a class="detail" id="player">link</a>
-			<p class="detail">Link to Scoreboard:</p>
-			<a class="detail" id="score">link</a>
-			<div style="height:1.5em;"></div>
-			<p class="detail">Session will be deleted after 20 Minutes of inactivity!</p>
-			<p class="detail">Sessions can be rejoined by using the same name.</p>
+<!-- Copyright (c) 2024-2026 Bjoern Boss Henrichsen -->
+<div contenteditable="false" class="main">
+	<div class="view">
+		<div class="padding">
+			<div class="content">
+				<p class="title">New Session Created!</p>
+				<div style="height:1.5em;"></div>
+				<p class="detail">Link for Players:</p>
+				<a class="detail" id="player">link</a>
+				<div style="height:1.0em;"></div>
+				<p class="detail">Link to Scoreboard:</p>
+				<a class="detail" id="score">link</a>
+				<div style="height:1.5em;"></div>
+				<p class="detail">Session will be deleted after 20 Minutes of inactivity!</p>
+				<p class="detail">Sessions can be rejoined by using the same name.</p>
+			</div>
 		</div>
 	</div>
-</body>
+</div>
 
 <script>
 	window.onload = function () {
-		let player = document.getElementById('player');
-		let score = document.getElementById('score');
-		let base = `${location.protocol}//${location.host}/quiz-game`;
+		const player = document.getElementById('player');
+		const score = document.getElementById('score');
+		const base = `${location.protocol}//${location.host}${location.pathname}`;
 
-		player.href = `${base}/client${location.search}`;
-		score.href = `${base}/score${location.search}`;
+		player.href = new URL(`./client${location.search}`, base).href;
+		score.href = new URL(`./score${location.search}`, base).href;
 
 		player.innerText = player.href;
 		score.innerText = score.href;
 	};
 </script>
-
-</html>

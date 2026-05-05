@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 class SyncSocket {
 	constructor(path) {
 		this._ws = null;
@@ -34,7 +34,7 @@ class SyncSocket {
 
 		/* construct the url for the web-socket */
 		let protocol = (location.protocol == 'https:' ? 'wss' : 'ws');
-		this._url = `${protocol}://${location.host}${path}`;
+		this._url = new URL(path, `${protocol}://${location.host}${location.pathname}`).href;
 
 		/* try to establish the first connection */
 		this._establish();
@@ -192,4 +192,4 @@ class SyncSocket {
 			this._failed(true);
 		}
 	}
-};
+}

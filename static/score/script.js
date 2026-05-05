@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright (c) 2024-2025 Bjoern Boss Henrichsen */
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 let _game = {};
 
 window.onload = function () {
@@ -27,14 +27,14 @@ window.onload = function () {
 	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'no-session-id';
 
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`/quiz-game/ws/${_game.sessionId}`);
+	_game.sock = new SyncSocket(`ws/${_game.sessionId}`);
 	_game.sock.onfailed = (m) => alert(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = null;
 
 	/* fetch the initial state */
 	_game.sock.fetch();
-};
+}
 _game.applyState = function (state) {
 	_game.state = state;
 	console.log('Applying received state');
@@ -135,4 +135,4 @@ _game.applyState = function (state) {
 	/* remove the remaining children */
 	while (_game.htmlScoreContent.children.length > list.length)
 		_game.htmlScoreContent.lastChild.remove();
-};
+}

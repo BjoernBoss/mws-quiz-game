@@ -452,7 +452,7 @@ export class QuizGame implements libInterface.ModuleInterface {
 			if (session.dead++ < SESSION_TIMEOUT_MINUTES + 1)
 				return;
 
-			/* close all connections */
+			/* close all connections (safe to iterate, even if it is nested removed from the set) */
 			session.ws.forEach((ws) => ws.close());
 
 			/* delete the session */
@@ -622,7 +622,7 @@ export class QuizGame implements libInterface.ModuleInterface {
 		/* check if a new session has been requested and create it */
 		if (client.path == '/new') {
 			let id = this.setupSession();
-			client.respondSeeOther(`${client.basePath}/session?id=${id}`);
+			client.respondSeeOther(client.makePath(`/session?id=${id}`));
 			return;
 		}
 
@@ -648,17 +648,19 @@ export class QuizGame implements libInterface.ModuleInterface {
 		if (!client.path.startsWith('/ws/'))
 			return;
 
-		/* extract the id and try to accept the socket (return with not-found as the entire endpoint is owned) */
+		/* extract the id and try to accept the socket (web-socket protocol handles unknown ids) */
 		let id = client.path.substring(4);
 		if (client.tryAcceptWebSocket((ws) => this.acceptWebSocket(ws, id)))
 			return;
 		client.error(`Invalid request for web-socket point for session: [${id}]`);
-		client.respondNotFound();
+		client.respondBadRequest('Endpoint is designed for web-sockets');
 	}
 	public async stop(): Promise<void> {
 		for (const [id, session] of this.sessions) {
 			if (session.timeout != null)
 				clearInterval(session.timeout);
+
+			/* safe to iterate, even if it is nested removed from the set */
 			session.ws.forEach((ws) => ws.close());
 			logger.log(`Session deleted: ${id}`);
 		}

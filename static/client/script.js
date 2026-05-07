@@ -3,7 +3,7 @@
 let _game = {};
 
 const COOKIE_NAME_LIFETIME_MS = 24 * 60 * 60 * 1000;
-const GAME_NAME_REGEX = /^[a-zA-Z0-9-_]+$/
+const GAME_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
 
 window.onload = function () {
 	/* setup the overall state */

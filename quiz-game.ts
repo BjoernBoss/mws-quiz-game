@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
-import * as libInterface from "core/interface.js";
+import * as libHandler from "core/handler.js";
 import * as libClient from "core/client.js";
 import * as libRequest from "core/request.js";
 import * as libLocation from "core/location.js";
@@ -13,7 +13,7 @@ import * as libCrypto from "crypto";
 const MODULE_NAME = 'quiz-game';
 const SESSION_TIMEOUT_MINUTES = 20;
 const SESSION_TIMER_CHECK_MINUTE = 60 * 1000;
-const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]+$/
+const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
 
 const logger = libLog.Logger(MODULE_NAME);
 
@@ -427,13 +427,14 @@ class Session {
 	}
 }
 
-export class QuizGame implements libInterface.ModuleInterface {
+export class QuizGame extends libHandler.ModuleHandler {
 	private fileStatic: (path: string) => string;
 	private jsonQuestions: Question[];
 	private sessions: Map<string, Session>;
 
-	public name: string = MODULE_NAME;
 	constructor() {
+		super(MODULE_NAME);
+
 		this.fileStatic = libLocation.MakeSelfPath(import.meta.url, '/static');
 		const questionPath = libLocation.MakeSelfPath(import.meta.url)('./categorized-questions.json');
 		this.jsonQuestions = JSON.parse(libFs.readFileSync(questionPath, 'utf8'));
@@ -442,31 +443,32 @@ export class QuizGame implements libInterface.ModuleInterface {
 
 	private setupSession(): string {
 		let id = libCrypto.randomUUID();
-		logger.log(`Session created: ${id}`);
+		logger.info(`Session created: ${id}`);
 		let session = new Session(this.jsonQuestions);
 		this.sessions.set(id, session);
 
 		/* setup the session-timeout checker (only considered alive when the state changes) */
-		let that = this;
-		session.timeout = setInterval(function () {
+		session.timeout = setInterval(async () => {
 			if (session.dead++ < SESSION_TIMEOUT_MINUTES + 1)
 				return;
 
-			/* close all connections (safe to iterate, even if it is nested removed from the set) */
-			session.ws.forEach((ws) => ws.close());
-
 			/* delete the session */
-			that.sessions.delete(id);
+			this.sessions.delete(id);
 			if (session.timeout != null)
 				clearInterval(session.timeout);
-			logger.log(`Session deleted: ${id}`);
+
+			/* close all connections (safe to iterate, even if it is nested removed from the set) */
+			const promises: Promise<void>[] = [];
+			session.ws.forEach((ws) => promises.push(ws.close()));
+			await Promise.all(promises);
+			logger.info(`Session deleted: ${id}`);
 		}, SESSION_TIMER_CHECK_MINUTE);
 		return id;
 	}
 	private async acceptWebSocket(client: libClient.ClientSocket, id: string): Promise<void> {
 		/* check if the session exists */
 		if (!this.sessions.has(id)) {
-			logger.log(`WebSocket connection for unknown session: ${id}`);
+			logger.error(`WebSocket connection for unknown session: ${id}`);
 			client.send(JSON.stringify({ cmd: 'unknown-session' }));
 			client.close();
 			return;
@@ -489,19 +491,19 @@ export class QuizGame implements libInterface.ModuleInterface {
 					if (hasName != '')
 						client.restore(snapshot);
 					if ((hasName = parsed.name) != '')
-						client.pushLog(hasName);
+						client.tagLog(hasName);
 				}
 
 				/* handle the message accordingly */
 				let response = session.handle(parsed);
 				if (response != null) {
-					client.log(`Received: ${parsed.cmd} -> ${response.cmd}`);
+					client.trace(`Received: ${parsed.cmd} -> ${response.cmd}`);
 					client.send(JSON.stringify(response));
 				}
 				else
-					client.log(`Received: ${parsed.cmd}`);
+					client.trace(`Received: ${parsed.cmd}`);
 			} catch (err: any) {
-				client.log(`Exception while message: [${err}]`);
+				client.error(`Exception while message: [${err}]`);
 				client.close();
 			}
 		};
@@ -530,7 +532,7 @@ export class QuizGame implements libInterface.ModuleInterface {
 		}
 	}
 	private async buildStartupPage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
 		const b = libBuilder;
 
 		const body: string | null = await this.fetchBody(client, '/base/startup.html');
@@ -550,7 +552,7 @@ export class QuizGame implements libInterface.ModuleInterface {
 		client.respondHtml(page, { status: libRequest.Status.Ok });
 	}
 	private async buildSessionPage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
 		const b = libBuilder;
 
 		const body: string | null = await this.fetchBody(client, '/base/session.html');
@@ -569,7 +571,7 @@ export class QuizGame implements libInterface.ModuleInterface {
 		client.respondHtml(page, { status: libRequest.Status.Ok });
 	}
 	private async buildClientPage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
 		const b = libBuilder;
 
 		const body: string | null = await this.fetchBody(client, '/client/main.html');
@@ -591,7 +593,7 @@ export class QuizGame implements libInterface.ModuleInterface {
 		client.respondHtml(page, { status: libRequest.Status.Ok });
 	}
 	private async buildScorePage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(client.makePath(path), true);
+		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
 		const b = libBuilder;
 
 		const body: string | null = await this.fetchBody(client, '/score/main.html');
@@ -612,7 +614,7 @@ export class QuizGame implements libInterface.ModuleInterface {
 		client.respondHtml(page, { status: libRequest.Status.Ok });
 	}
 
-	public async request(client: libClient.HttpRequest): Promise<void> {
+	protected override async handleRequest(client: libClient.HttpRequest): Promise<void> {
 		client.trace(`Game handler for [${client.path}]`);
 
 		/* all endpoints only support 'getting' */
@@ -641,29 +643,39 @@ export class QuizGame implements libInterface.ModuleInterface {
 		/* respond to the request by trying to serve the file (all files are considered stable) */
 		await client.tryRespondFile(this.fileStatic(client.path), true);
 	}
-	public async upgrade(client: libClient.HttpUpgrade): Promise<void> {
+	protected override async handleUpgrade(client: libClient.HttpUpgrade): Promise<void> {
 		client.trace(`Game handler for [${client.path}]`);
 
 		/* check if the websocket has been requested */
 		if (!client.path.startsWith('/ws/'))
 			return;
 
-		/* extract the id and try to accept the socket (web-socket protocol handles unknown ids) */
+		/* extract the id and try to accept the socket (web-socket protocol handles unknown ids; await
+		*	acceptance to ensure the stop method is not entered before the full accept has been performed) */
 		let id = client.path.substring(4);
-		if (client.tryAcceptWebSocket((ws) => this.acceptWebSocket(ws, id)))
-			return;
-		client.error(`Invalid request for web-socket point for session: [${id}]`);
-		client.respondBadRequest('Endpoint is designed for web-sockets');
+		const ws = await client.acceptWebSocket();
+		if (ws != null)
+			await this.acceptWebSocket(ws, id);
 	}
-	public async stop(): Promise<void> {
-		for (const [id, session] of this.sessions) {
-			if (session.timeout != null)
-				clearInterval(session.timeout);
+	protected override async handleStop(): Promise<void> {
+		const sessions: Promise<void>[] = [];
 
-			/* safe to iterate, even if it is nested removed from the set */
-			session.ws.forEach((ws) => ws.close());
-			logger.log(`Session deleted: ${id}`);
+		/* sessions can just be cleared as no new connections will be incoming once module is being stopped */
+		for (const [id, session] of this.sessions) {
+			sessions.push(new Promise<void>(async (resolve) => {
+				if (session.timeout != null)
+					clearInterval(session.timeout);
+
+				/* safe to iterate, even if it is nested removed from the set */
+				const promises: Promise<void>[] = [];
+				session.ws.forEach((ws) => promises.push(ws.close()));
+				await Promise.all(promises);
+				logger.info(`Session deleted: ${id}`);
+				resolve();
+			}));
 		}
 		this.sessions.clear();
+
+		await Promise.all(sessions);
 	}
 }

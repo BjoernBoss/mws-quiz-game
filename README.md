@@ -46,5 +46,9 @@ Then just build and run the server as usual.
 | GET | `/**/*.css`, `/**/*.js` | Static assets |
 | WebSocket | `/ws/{id}` | Join a game session |
 
+## Cookies
+
+The client code sets the cookie `quiz-game-last-name` to the last used player name, to retrieve and reuse it on the next refresh.
+
 ## WebSocket Protocol
 The game is built on trust, every WebSocket connection just publishes updates of its player state, which are then pushed to all other clients, where necessary.

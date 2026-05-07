@@ -148,7 +148,7 @@ class SyncSocket {
 			this._establish();
 			return;
 		}
-		if (this._delay <= 1024) {
+		if (this._delay <= 512) {
 			this._state = 'connecting';
 			setTimeout(() => this._establish(), this._delay);
 			this._delay *= 2;

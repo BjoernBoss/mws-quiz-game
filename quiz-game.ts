@@ -628,7 +628,7 @@ export class QuizGame extends libHandler.ModuleHandler {
 			return;
 		}
 
-		/* check if its one of the html endpoints and build them dynamically and discard any other html requests */
+		/* check if its one of the html endpoints and build them dynamically */
 		if (client.path == '/')
 			return this.buildStartupPage(client);
 		if (client.path == '/session')
@@ -637,11 +637,10 @@ export class QuizGame extends libHandler.ModuleHandler {
 			return this.buildClientPage(client);
 		if (client.path == '/score')
 			return this.buildScorePage(client);
-		if (client.path.toLowerCase().endsWith('.html'))
-			return;
 
-		/* respond to the request by trying to serve the file (all files are considered stable) */
-		await client.tryRespondFile(this.fileStatic(client.path), true);
+		/* respond to the request by trying to serve the file (discard html requests; all files are considered stable) */
+		if (!client.path.toLowerCase().endsWith('.html'))
+			await client.tryRespondFile(this.fileStatic(client.path), true);
 	}
 	protected override async handleUpgrade(client: libClient.HttpUpgrade): Promise<void> {
 		client.trace(`Game handler for [${client.path}]`);
@@ -662,7 +661,7 @@ export class QuizGame extends libHandler.ModuleHandler {
 
 		/* sessions can just be cleared as no new connections will be incoming once module is being stopped */
 		for (const [id, session] of this.sessions) {
-			sessions.push(new Promise<void>(async (resolve) => {
+			sessions.push((async () => {
 				if (session.timeout != null)
 					clearInterval(session.timeout);
 
@@ -671,8 +670,7 @@ export class QuizGame extends libHandler.ModuleHandler {
 				session.ws.forEach((ws) => promises.push(ws.close()));
 				await Promise.all(promises);
 				logger.info(`Session deleted: ${id}`);
-				resolve();
-			}));
+			})());
 		}
 		this.sessions.clear();
 

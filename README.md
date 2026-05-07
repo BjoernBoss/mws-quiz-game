@@ -40,6 +40,7 @@ Then just build and run the server as usual.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/` | Create a new game session |
+| GET | `/new` | Transfer to the actual session creation |
 | GET | `/session?id={id}` | Page providing the player and scoreboard pages |
 | GET | `/client?id={id}` | Play as one client in the game |
 | GET | `/score?id={id}` | View the score and other information for the game |

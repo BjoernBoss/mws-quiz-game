@@ -1,21 +1,12 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
-import * as libHandler from "core/handler.js";
-import * as libClient from "core/client.js";
-import * as libRequest from "core/request.js";
-import * as libLocation from "core/location.js";
-import * as libLog from "core/log.js";
-import * as libBuilder from "core/builder.js";
-import * as libCache from "core/cache.js";
+import * as mws from "@bjoernboss/mws";
 import * as libFs from "fs";
 import * as libCrypto from "crypto";
 
-const MODULE_NAME = 'quiz-game';
 const SESSION_TIMEOUT_MINUTES = 20;
 const SESSION_TIMER_CHECK_MINUTE = 60 * 1000;
 const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
-
-const logger = libLog.Logger(MODULE_NAME);
 
 interface Question {
 	text: string;
@@ -390,12 +381,12 @@ class GameState {
 class Session {
 	public timeout: NodeJS.Timeout | null;
 	public dead: number;
-	public ws: Set<libClient.ClientSocket>;
+	public ws: Set<mws.ClientSocket>;
 	public state: GameState;
 
 	constructor(questions: Question[]) {
 		this.state = new GameState(questions);
-		this.ws = new Set<libClient.ClientSocket>();
+		this.ws = new Set<mws.ClientSocket>();
 		this.dead = 0;
 		this.timeout = null;
 	}
@@ -427,23 +418,23 @@ class Session {
 	}
 }
 
-export class QuizGame extends libHandler.ModuleHandler {
+export class QuizGame extends mws.ModuleHandler {
 	private fileStatic: (path: string) => string;
 	private jsonQuestions: Question[];
 	private sessions: Map<string, Session>;
 
 	constructor() {
-		super(MODULE_NAME);
+		super('quiz-game');
 
-		this.fileStatic = libLocation.MakeSelfPath(import.meta.url, '/static');
-		const questionPath = libLocation.MakeSelfPath(import.meta.url)('./categorized-questions.json');
+		this.fileStatic = mws.createPathSelf(import.meta.url, '/static');
+		const questionPath = mws.createPathSelf(import.meta.url)('./categorized-questions.json');
 		this.jsonQuestions = JSON.parse(libFs.readFileSync(questionPath, 'utf8'));
 		this.sessions = new Map<string, Session>()
 	}
 
 	private setupSession(): string {
 		let id = libCrypto.randomUUID();
-		logger.info(`Session created: ${id}`);
+		this.info(`Session created: ${id}`);
 		let session = new Session(this.jsonQuestions);
 		this.sessions.set(id, session);
 
@@ -461,14 +452,14 @@ export class QuizGame extends libHandler.ModuleHandler {
 			const promises: Promise<void>[] = [];
 			session.ws.forEach((ws) => promises.push(ws.close()));
 			await Promise.all(promises);
-			logger.info(`Session deleted: ${id}`);
+			this.info(`Session deleted: ${id}`);
 		}, SESSION_TIMER_CHECK_MINUTE);
 		return id;
 	}
-	private async acceptWebSocket(client: libClient.ClientSocket, id: string): Promise<void> {
+	private async acceptWebSocket(client: mws.ClientSocket, id: string): Promise<void> {
 		/* check if the session exists */
 		if (!this.sessions.has(id)) {
-			logger.error(`WebSocket connection for unknown session: ${id}`);
+			this.error(`WebSocket connection for unknown session: ${id}`);
 			client.send(JSON.stringify({ cmd: 'unknown-session' }));
 			client.close();
 			return;
@@ -478,21 +469,16 @@ export class QuizGame extends libHandler.ModuleHandler {
 		/* register the listener and advance the initial stage */
 		session.ws.add(client);
 		client.log(`Websocket connected`);
-		const snapshot = client.snapshot();
-		let hasName = '';
+		let connectionName = '', nameLogTag = client.tagLog('');
 
 		/* register the callbacks */
-		client.ondata = function (msg) {
+		client.on('data', (msg) => {
 			try {
 				let parsed = JSON.parse(msg.toString('utf-8'));
 
 				/* check if a name can be assigned to the game */
-				if (typeof parsed.name == 'string' && parsed.name != hasName) {
-					if (hasName != '')
-						client.restore(snapshot);
-					if ((hasName = parsed.name) != '')
-						client.tagLog(hasName);
-				}
+				if (typeof parsed.name == 'string' && parsed.name != connectionName)
+					nameLogTag(connectionName = parsed.name);
 
 				/* handle the message accordingly */
 				let response = session.handle(parsed);
@@ -506,125 +492,129 @@ export class QuizGame extends libHandler.ModuleHandler {
 				client.error(`Exception while message: [${err}]`);
 				client.close();
 			}
-		};
-		client.onclose = function () {
+		});
+		client.on('close', () => {
 			session.ws.delete(client);
 			client.log(`Websocket disconnected`);
-		};
+		});
 	}
-	private async fetchBody(client: libClient.HttpRequest, path: string): Promise<string | null> {
+	private staticPath(client: mws.ClientRequest, path: string): string {
+		return client.makePath(this.cache.immutable(this.name, path));
+	}
+	private async fetchBody(client: mws.ClientRequest, path: string): Promise<string | null> {
 		const fullPath = this.fileStatic(path);
 
-		const cached: libCache.Cached | null = libCache.GetActual(fullPath, true);
-		if (cached == null) {
-			client.error(`Failed to find content [${fullPath}]`);
-			client.respondFileSystemError();
-			return null;
-		}
-
+		/* look for the file (will never be an immutable path) */
 		try {
-			return (await cached.readAsync()).toString('utf-8');
+			const data: Buffer | null = await this.cache.read(fullPath);
+			if (data == null) {
+				client.respondInternalError(`Failed to find content [${fullPath}]`);
+				return null;
+			}
+			return data.toString('utf-8');
 		}
 		catch (err: any) {
-			client.error(`Failed to read content [${fullPath}]: ${err.message}`);
-			client.respondFileSystemError();
+			client.respondInternalError(`Failed to read content [${fullPath}]: ${err.message}`);
 			return null;
 		}
 	}
-	private async buildStartupPage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
-		const b = libBuilder;
-
+	private async buildStartupPage(client: mws.ClientRequest): Promise<void> {
 		const body: string | null = await this.fetchBody(client, '/base/startup.html');
 		if (body == null)
 			return;
 
+		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
 			head: [
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Start Session!'),
-				b.LoadStyle(toPath('/common/buttons.css')),
-				b.LoadStyle(toPath('/base/style.css'))
+				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
+				b.LoadStyle(this.staticPath(client, '/base/style.css'))
 			],
 			body: b.Embed(body, true)
 		});
-		client.respondHtml(page, { status: libRequest.Status.Ok });
+		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
-	private async buildSessionPage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
-		const b = libBuilder;
-
+	private async buildSessionPage(client: mws.ClientRequest): Promise<void> {
 		const body: string | null = await this.fetchBody(client, '/base/session.html');
 		if (body == null)
 			return;
 
+		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
 			head: [
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('New Session Created!'),
-				b.LoadStyle(toPath('/base/style.css'))
+				b.LoadStyle(this.staticPath(client, '/base/style.css'))
 			],
 			body: b.Embed(body, true)
 		});
-		client.respondHtml(page, { status: libRequest.Status.Ok });
+		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
-	private async buildClientPage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
-		const b = libBuilder;
-
+	private async buildClientPage(client: mws.ClientRequest): Promise<void> {
 		const body: string | null = await this.fetchBody(client, '/client/main.html');
 		if (body == null)
 			return;
 
+		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
 			head: [
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Normal Player!'),
-				b.LoadStyle(toPath('/common/buttons.css')),
-				b.LoadStyle(toPath('/client/style.css')),
-				b.LoadScript(toPath('/common/sync-socket.js')),
-				b.LoadScript(toPath('/client/script.js'))
+				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
+				b.LoadStyle(this.staticPath(client, '/client/style.css')),
+				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
+				b.LoadScript(this.staticPath(client, '/client/script.js'))
 			],
 			body: b.Embed(body, true)
 		});
-		client.respondHtml(page, { status: libRequest.Status.Ok });
+		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
-	private async buildScorePage(client: libClient.HttpRequest): Promise<void> {
-		const toPath = (path: string) => libCache.MakeImmutable(this.moduleName, client.makePath(path), true);
-		const b = libBuilder;
-
+	private async buildScorePage(client: mws.ClientRequest): Promise<void> {
 		const body: string | null = await this.fetchBody(client, '/score/main.html');
 		if (body == null)
 			return;
 
+		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
 			head: [
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Scoreboard!'),
-				b.LoadStyle(toPath('/score/style.css')),
-				b.LoadScript(toPath('/common/sync-socket.js')),
-				b.LoadScript(toPath('/score/script.js'))
+				b.LoadStyle(this.staticPath(client, '/score/style.css')),
+				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
+				b.LoadScript(this.staticPath(client, '/score/script.js'))
 			],
 			body: b.Embed(body, true)
 		});
-		client.respondHtml(page, { status: libRequest.Status.Ok });
+		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
 
-	protected override async handleRequest(client: libClient.HttpRequest): Promise<void> {
+	protected override async handleRequest(client: mws.ClientRequest): Promise<void> {
 		client.trace(`Game handler for [${client.path}]`);
 
 		/* all endpoints only support 'getting' */
-		if (client.checkMethod('GET') == null)
+		if (client.requireMethod('GET') == null)
 			return;
 
 		/* check if a new session has been requested and create it */
 		if (client.path == '/new') {
 			let id = this.setupSession();
 			client.respondSeeOther(client.makePath(`/session?id=${id}`));
+			return;
+		}
+
+		/* check if the websocket has been requested */
+		if (client.isInsideOf('/ws')) {
+			let id = mws.childPath('/ws', client.path).substring(1);
+
+			/* extract the id and try to accept the socket (web-socket protocol handles unknown ids) */
+			const ws = await client.acceptWebSocket();
+			if (ws != null)
+				await this.acceptWebSocket(ws, id);
 			return;
 		}
 
@@ -638,42 +628,24 @@ export class QuizGame extends libHandler.ModuleHandler {
 		if (client.path == '/score')
 			return this.buildScorePage(client);
 
-		/* respond to the request by trying to serve the file (discard html requests; all files are considered stable) */
+		/* respond to the request by trying to serve the file (discard html requests) */
 		if (!client.path.toLowerCase().endsWith('.html'))
-			await client.tryRespondFile(this.fileStatic(client.path), true);
-	}
-	protected override async handleUpgrade(client: libClient.HttpUpgrade): Promise<void> {
-		client.trace(`Game handler for [${client.path}]`);
-
-		/* check if the websocket has been requested */
-		if (!client.path.startsWith('/ws/'))
-			return;
-
-		/* extract the id and try to accept the socket (web-socket protocol handles unknown ids; await
-		*	acceptance to ensure the stop method is not entered before the full accept has been performed) */
-		let id = client.path.substring(4);
-		const ws = await client.acceptWebSocket();
-		if (ws != null)
-			await this.acceptWebSocket(ws, id);
+			await client.tryRespondFile(this.fileStatic(client.path));
 	}
 	protected override async handleStop(): Promise<void> {
-		const sessions: Promise<void>[] = [];
+		const connections: Promise<void>[] = [];
 
-		/* sessions can just be cleared as no new connections will be incoming once module is being stopped */
+		/* iterate over any connections and kill them (safe to iterate, even if close immediately removes the connection) */
+		for (const [_, session] of this.sessions)
+			session.ws.forEach((ws) => connections.push(ws.close()));
+		await Promise.all(connections);
+
+		/* remove all sessions and timeouts */
 		for (const [id, session] of this.sessions) {
-			sessions.push((async () => {
-				if (session.timeout != null)
-					clearInterval(session.timeout);
-
-				/* safe to iterate, even if it is nested removed from the set */
-				const promises: Promise<void>[] = [];
-				session.ws.forEach((ws) => promises.push(ws.close()));
-				await Promise.all(promises);
-				logger.info(`Session deleted: ${id}`);
-			})());
+			if (session.timeout != null)
+				clearInterval(session.timeout);
+			this.info(`Session deleted: ${id}`);
 		}
 		this.sessions.clear();
-
-		await Promise.all(sessions);
 	}
 }

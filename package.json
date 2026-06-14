@@ -1,7 +1,43 @@
 {
+	"name": "@bjoernboss/mws-quiz-game",
+	"version": "1.0.0",
 	"type": "module",
-	"private": true,
+	"description": "Module in TypeScript to create and play a quiz-game against each other - For Modular Web Server",
+	"license": "BSD-3-Clause",
+	"author": "Bjoern Boss Henrichsen <bjoernbossdev@gmail.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/BjoernBoss/mws-quiz-game.git"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"main": "dist/quiz-game.js",
+	"types": "dist/quiz-game.d.ts",
+	"exports": {
+		".": {
+			"default": "./dist/quiz-game.js",
+			"types": "./dist/quiz-game.d.ts"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist/**/*.js",
+		"dist/**/*.d.ts",
+		"data/**/*",
+		"static/**/*"
+	],
 	"scripts": {
-		"build": "tsc"
+		"prepare": "tsc"
+	},
+	"dependencies": {
+		"@bjoernboss/mws": "^1.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^25.6.0",
+		"typescript": "^6.0.3"
+	},
+	"engines": {
+		"node": ">=22.0.0"
 	}
 }

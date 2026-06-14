@@ -5,14 +5,12 @@ import * as libFs from "fs";
 import * as libCrypto from "crypto";
 
 const SESSION_TIMEOUT_MINUTES = 20;
-const SESSION_TIMER_CHECK_MINUTE = 60 * 1000;
 const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
 
 interface Question {
 	text: string;
-	options: string[4];
-	correct: number;
 	category: string;
+	options: [string, string, string, string];
 }
 interface GameEffects<T> {
 	expose: T;
@@ -303,7 +301,7 @@ class GameState {
 				question: this.question,
 				totalQuestions: this.total,
 				players: this.players,
-				round: this.round,
+				round: this.round
 			}
 		};
 	}
@@ -379,24 +377,47 @@ class GameState {
 	}
 }
 class Session {
-	public timeout: NodeJS.Timeout | null;
-	public dead: number;
-	public ws: Set<mws.ClientSocket>;
-	public state: GameState;
+	private timeout: NodeJS.Timeout | null;
+	private state: GameState;
+	private dropSelf: (() => void) | null;
+	private ws: Set<mws.ClientSocket>;
 
-	constructor(questions: Question[]) {
+	constructor(questions: Question[], dropSelf: () => void) {
 		this.state = new GameState(questions);
 		this.ws = new Set<mws.ClientSocket>();
-		this.dead = 0;
 		this.timeout = null;
-	}
+		this.dropSelf = dropSelf;
 
-	public sync(): void {
-		this.dead = 0;
+		/* start the session timout */
+		this.selfAlive();
+	}
+	private selfAlive(): void {
+		if (this.timeout != null)
+			clearTimeout(this.timeout);
+		this.timeout = (this.dropSelf == null ? null : setTimeout(() => this.drop(), SESSION_TIMEOUT_MINUTES * 60 * 1000));
+	}
+	private syncStateChange(): void {
+		this.selfAlive();
 		const msg = JSON.stringify(this.state.makeState());
 		this.ws.forEach(ws => ws.send(msg));
 	}
 
+	public async drop(): Promise<void> {
+		if (this.timeout != null)
+			clearTimeout(this.timeout);
+		this.timeout = null;
+
+		/* delete the session */
+		if (this.dropSelf == null)
+			return;
+		this.dropSelf();
+		this.dropSelf = null;
+
+		/* close all connections (safe to iterate, even if it is nested removed from the set) */
+		const promises: Promise<void>[] = [];
+		this.ws.forEach((ws) => promises.push(ws.close()));
+		await Promise.all(promises);
+	}
 	public handle(msg: any): { cmd: string } | null {
 		if (typeof (msg.cmd) != 'string' || msg.cmd == '')
 			return { cmd: 'malformed' };
@@ -410,50 +431,95 @@ class Session {
 					return { cmd: 'malformed' };
 				if (!this.state.updatePlayer(msg.name, msg.value))
 					return { cmd: 'malformed' };
-				this.sync();
+				this.syncStateChange();
 				return null;
 			default:
 				return { cmd: 'malformed' };
 		}
 	}
+	public addPlayer(ws: mws.ClientSocket): void {
+		this.selfAlive();
+		this.ws.add(ws);
+	}
+	public dropPlayer(ws: mws.ClientSocket): void {
+		this.ws.delete(ws);
+	}
 }
 
 export class QuizGame extends mws.ModuleHandler {
 	private fileStatic: (path: string) => string;
+	private fileData: (path: string) => string;
 	private jsonQuestions: Question[];
 	private sessions: Map<string, Session>;
 
-	constructor() {
+	constructor(questionsPath?: string) {
 		super('quiz-game');
 
-		this.fileStatic = mws.createPathSelf(import.meta.url, '/static');
-		const questionPath = mws.createPathSelf(import.meta.url)('./categorized-questions.json');
-		this.jsonQuestions = JSON.parse(libFs.readFileSync(questionPath, 'utf8'));
-		this.sessions = new Map<string, Session>()
+		this.fileStatic = mws.createPathSelf(import.meta.url, '../static');
+		this.fileData = mws.createPathSelf(import.meta.url, '../data');
+		this.sessions = new Map<string, Session>();
+
+		/* load the actual questions */
+		this.jsonQuestions = this.loadQuestions(questionsPath ?? this.fileData('/default.json'));
 	}
 
+	private checkQuestionEntry(entry: any): boolean {
+		if (typeof entry.text != 'string' || entry.text == '')
+			return false;
+		if (typeof entry.category != 'string' || entry.category == '')
+			return false;
+		if (typeof entry.correct != 'string' || entry.category == '')
+			return false;
+		if (!Array.isArray(entry.incorrect) || entry.incorrect.length != 3)
+			return false;
+		for (const opt of entry.incorrect) {
+			if (typeof opt != 'string' || opt == '')
+				return false;
+		}
+		return true;
+	}
+	private loadQuestions(path: string): Question[] {
+		const out: Question[] = [];
+
+		/* load the file data */
+		let data: any = [];
+		try {
+			this.info(`Loading questions from [${path}]`);
+			data = JSON.parse(libFs.readFileSync(path, 'utf-8'));
+		}
+		catch (err: any) {
+			this.error(`Failed to load questions [${path}]: ${err.message}`);
+		}
+
+		/* parse the question data */
+		if (!Array.isArray(data))
+			this.warning(`Malformed question format of [${path}]`);
+		else for (const entry of data) {
+			if (!this.checkQuestionEntry(entry)) {
+				this.warning(`Malformed question in [${path}]: ${entry.text}`);
+				continue;
+			}
+
+			out.push({
+				text: entry.text,
+				category: entry.category,
+				options: [entry.correct, entry.incorrect[0], entry.incorrect[1], entry.incorrect[2]]
+			});
+		}
+
+		this.info(`Successfully loaded [${out.length}] questions`);
+		return out;
+	}
 	private setupSession(): string {
 		let id = libCrypto.randomUUID();
-		this.info(`Session created: ${id}`);
-		let session = new Session(this.jsonQuestions);
-		this.sessions.set(id, session);
 
-		/* setup the session-timeout checker (only considered alive when the state changes) */
-		session.timeout = setInterval(async () => {
-			if (session.dead++ < SESSION_TIMEOUT_MINUTES + 1)
-				return;
-
-			/* delete the session */
+		const session = new Session(this.jsonQuestions, () => {
 			this.sessions.delete(id);
-			if (session.timeout != null)
-				clearInterval(session.timeout);
-
-			/* close all connections (safe to iterate, even if it is nested removed from the set) */
-			const promises: Promise<void>[] = [];
-			session.ws.forEach((ws) => promises.push(ws.close()));
-			await Promise.all(promises);
 			this.info(`Session deleted: ${id}`);
-		}, SESSION_TIMER_CHECK_MINUTE);
+		});
+
+		this.info(`Session created: ${id}`);
+		this.sessions.set(id, session);
 		return id;
 	}
 	private async acceptWebSocket(client: mws.ClientSocket, id: string): Promise<void> {
@@ -467,7 +533,7 @@ export class QuizGame extends mws.ModuleHandler {
 		let session = this.sessions.get(id)!;
 
 		/* register the listener and advance the initial stage */
-		session.ws.add(client);
+		session.addPlayer(client);
 		client.log(`Websocket connected`);
 		let connectionName = '', nameLogTag = client.tagLog('');
 
@@ -494,7 +560,7 @@ export class QuizGame extends mws.ModuleHandler {
 			}
 		});
 		client.on('close', () => {
-			session.ws.delete(client);
+			session.dropPlayer(client);
 			client.log(`Websocket disconnected`);
 		});
 	}
@@ -502,7 +568,7 @@ export class QuizGame extends mws.ModuleHandler {
 		return client.makePath(this.cache.immutable(this.name, path));
 	}
 	private async fetchBody(client: mws.ClientRequest, path: string): Promise<string | null> {
-		const fullPath = this.fileStatic(path);
+		const fullPath = this.fileData(path);
 
 		/* look for the file (will never be an immutable path) */
 		try {
@@ -519,7 +585,7 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 	}
 	private async buildStartupPage(client: mws.ClientRequest): Promise<void> {
-		const body: string | null = await this.fetchBody(client, '/base/startup.html');
+		const body: string | null = await this.fetchBody(client, '/startup.html');
 		if (body == null)
 			return;
 
@@ -537,7 +603,7 @@ export class QuizGame extends mws.ModuleHandler {
 		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildSessionPage(client: mws.ClientRequest): Promise<void> {
-		const body: string | null = await this.fetchBody(client, '/base/session.html');
+		const body: string | null = await this.fetchBody(client, '/session.html');
 		if (body == null)
 			return;
 
@@ -554,7 +620,7 @@ export class QuizGame extends mws.ModuleHandler {
 		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildClientPage(client: mws.ClientRequest): Promise<void> {
-		const body: string | null = await this.fetchBody(client, '/client/main.html');
+		const body: string | null = await this.fetchBody(client, '/client.html');
 		if (body == null)
 			return;
 
@@ -574,7 +640,7 @@ export class QuizGame extends mws.ModuleHandler {
 		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildScorePage(client: mws.ClientRequest): Promise<void> {
-		const body: string | null = await this.fetchBody(client, '/score/main.html');
+		const body: string | null = await this.fetchBody(client, '/score.html');
 		if (body == null)
 			return;
 
@@ -633,19 +699,11 @@ export class QuizGame extends mws.ModuleHandler {
 			await client.tryRespondFile(this.fileStatic(client.path));
 	}
 	protected override async handleStop(): Promise<void> {
-		const connections: Promise<void>[] = [];
+		const list: Promise<void>[] = [];
 
-		/* iterate over any connections and kill them (safe to iterate, even if close immediately removes the connection) */
+		/* drop all sections (safe to iterate, even when they remove themselves) */
 		for (const [_, session] of this.sessions)
-			session.ws.forEach((ws) => connections.push(ws.close()));
-		await Promise.all(connections);
-
-		/* remove all sessions and timeouts */
-		for (const [id, session] of this.sessions) {
-			if (session.timeout != null)
-				clearInterval(session.timeout);
-			this.info(`Session deleted: ${id}`);
-		}
-		this.sessions.clear();
+			list.push(session.drop());
+		await Promise.all(list);
 	}
 }

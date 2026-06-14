@@ -19,12 +19,12 @@ Clone into the modules directory of an existing MWS-Base installation:
 Register the module in `modules/setup.js`:
 
 ```JavaScript
-import * as libInterface from "core/interface.js";
+import * as libHandler from "core/handler.js";
 
 export async function Run(server) {
     try {
         const quizGame = await import("quiz-game/quiz-game.js");
-        const dispatch = new libInterface.DispatchModule({
+        const dispatch = new libHandler.DispatchModule({
             '/quiz-game': new quizGame.QuizGame(),
         });
         server.listenHttp(8080, dispatch, (host) => host == 'localhost');
@@ -53,3 +53,6 @@ The client code sets the cookie `quiz-game-last-name` to the last used player na
 
 ## WebSocket Protocol
 The game is built on trust, every WebSocket connection just publishes updates of its player state, which are then pushed to all other clients, where necessary.
+
+## Default Questions
+The 230 default questions were sourced from [Open Trivia Database](https://opentdb.com/).

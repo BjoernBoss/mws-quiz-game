@@ -71,7 +71,6 @@ window.onload = function () {
 		last: {},
 		applied: {},
 	};
-	_game.toScramble = [];
 	_game.fromScramble = [];
 	_game.lastScramble = '';
 
@@ -203,17 +202,15 @@ _game.setupScramble = function () {
 	_game.lastScramble = _game.state.question.text;
 
 	/* setup the initial raw mapping */
-	let indices = [];
+	const indices = [];
 	for (let i = 0; i < _game.state.question.options.length; ++i)
 		indices.push(i);
-	_game.toScramble = Array.from(Array(_game.state.question.options.length).keys());
 	_game.fromScramble = Array.from(Array(_game.state.question.options.length).keys());
 
 	/* fetch the indices in random order */
 	let next = 0;
 	while (indices.length > 0) {
 		let index = Math.floor(Math.random() * indices.length);
-		_game.toScramble[next] = indices[index];
 		_game.fromScramble[indices[index]] = next;
 
 		indices.splice(index, 1);
@@ -433,11 +430,11 @@ _game.applyQuestion = function () {
 		let question = _game.state.question;
 
 		/* setup the selection-theme */
-		if (_game.toScramble[_game.self.choice] != i)
+		if (_game.self.choice != _game.fromScramble[i])
 			node.classList.remove('selected', 'selected-correct', 'selected-wrong');
 		else if (_game.state.phase == 'answer')
 			node.classList.add('selected');
-		else if (_game.toScramble[question.correct] == i && _game.self.applied.fail == null)
+		else if (_game.fromScramble[i] == 0 && _game.self.applied.fail == null)
 			node.classList.add('selected-correct');
 		else
 			node.classList.add('selected-wrong');
@@ -453,7 +450,7 @@ _game.applyQuestion = function () {
 			node.classList.remove('invalid');
 			node.classList.remove('correct');
 		}
-		else if (_game.toScramble[question.correct] == i) {
+		else if (_game.fromScramble[i] == 0) {
 			node.classList.remove('invalid');
 			node.classList.add('correct');
 		}
@@ -600,7 +597,7 @@ _game.choose = function (v) {
 		return;
 
 	_game.self.choice = _game.fromScramble[v];
-	_game.self.correct = (_game.self.choice == _game.state.question.correct);
+	_game.self.correct = (_game.self.choice == 0);
 	_game.selfChanged();
 }
 _game.activate = function (name) {

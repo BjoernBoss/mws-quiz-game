@@ -1,58 +1,157 @@
-# \[MWS\] Module to Play a Quiz Game Together
+# \[MWS\] Module to Create and Play a Quiz Game Together
 ![TypeScript](https://img.shields.io/badge/language-TypeScript-blue?style=flat-square)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-brightgreen?style=flat-square)](LICENSE.txt)
 
-This repository is designed to be used with the [`MWS-Base`](https://github.com/BjoernBoss/mws-base.git).
+A multiplayer quiz-game module for [`@bjoernboss/mws`](https://github.com/BjoernBoss/mws).
 
-It provides an interactive way to play a quiz-game together, consisting of about 190 questions.
-The quiz-game allows players to use fun special effects on other players, such as taking away their points, or teasing them in other ways.
+Players create a session, join it by name, and compete through rounds of multiple-choice trivia. Each round consists of a category phase where players set their confidence and activate effects, followed by an answer phase where the question is revealed. Between rounds, players can use special effects to interfere with each other's scores, adding a strategic layer on top of the trivia.
 
-All active sessions are managed by the created `QuizGame` object. Sharing this object across multiple listened ports will therefore ensure each port shares a common player base.
+Game sessions live entirely in memory and are automatically cleaned up after inactivity. All active sessions are managed by the `QuizGame` module.
 
-The game differentiates players by name. Logging in with the same name will result in two players controlling the same user.
+## Installation
+
+	$ npm install @bjoernboss/mws-quiz-game
+
+Requires Node.js 22 or later.
 
 ## Setup
-Clone into the modules directory of an existing MWS-Base installation:
 
-    $ git clone https://github.com/BjoernBoss/mws-quiz-game.git modules/quiz-game
+The `QuizGame` module takes an optional configuration object with a questions source and an `Access` object. Mount it under a path using `dispatch`:
 
-Register the module in `modules/setup.js`:
+```typescript
+import { Server, dispatch, addLogger, createConsoleLogger } from "@bjoernboss/mws";
+import { QuizGame } from "@bjoernboss/mws-quiz-game";
 
-```JavaScript
-import * as libHandler from "core/handler.js";
+addLogger(createConsoleLogger());
 
-export async function Run(server) {
-    try {
-        const quizGame = await import("quiz-game/quiz-game.js");
-        const dispatch = new libHandler.DispatchModule({
-            '/quiz-game': new quizGame.QuizGame(),
-        });
-        server.listenHttp(8080, dispatch, (host) => host == 'localhost');
-    } catch (e) {
-        throw new Error(`Failed to load module: ${e.message}`);
-    }
-}
+const server = new Server();
+const quiz = new QuizGame({
+    questions: './data/questions.json',
+    access: { create: true }
+});
+
+server.listen(dispatch({ '/quiz': quiz }), { port: 8080 });
 ```
 
-Then just build and run the server as usual.
+Navigate to `http://localhost:8080/quiz/` to create a new session.
 
-## HTTP Endpoints
-| Method | Path | Description |
+## Questions
+
+Questions can be provided as a file path to a JSON file or as an array of `Question` objects passed directly to the constructor. If omitted, the module loads a built-in set of 241 trivia questions sourced from [Open Trivia Database](https://opentdb.com/).
+
+Each question requires a text, category, one correct answer, and at least one incorrect answer:
+
+```json
+[
+    {
+        "text": "What is the largest planet in the Solar System?",
+        "category": "Science & Nature",
+        "correct": "Jupiter",
+        "incorrect": ["Saturn", "Earth", "Mars"]
+    }
+]
+```
+
+Answer options are shuffled on the client side each round.
+
+## Access Control
+
+The `Access` object controls which operations are allowed. All default to `false`:
+
+| Field | Default | Description |
 |---|---|---|
-| GET | `/` | Create a new game session |
-| GET | `/new` | Transfer to the actual session creation |
-| GET | `/session?id={id}` | Page providing the player and scoreboard pages |
-| GET | `/client?id={id}` | Play as one client in the game |
-| GET | `/score?id={id}` | View the score and other information for the game |
-| GET | `/**/*.css`, `/**/*.js` | Static assets |
-| WebSocket | `/ws/{id}` | Join a game session |
+| `create` | `false` | Create new game sessions |
+
+Access can also be granted per-request through `params` when dispatching to the module. Request parameters override the corresponding default, allowing parent modules to implement authentication or per-route access policies.
+
+## Endpoints
+
+The `Endpoints` export provides the path constants used by the module. All paths are relative to the module's mount point.
+
+| Path | Method | Description |
+|---|---|---|
+| `/` | GET | Welcome page with a button to create a new session |
+| `/new` | GET | Creates a new session and redirects to the session page (requires `create` access) |
+| `/session` | GET | Session hub: links to the player client and scoreboard (query param: `id`) |
+| `/client` | GET | Player interface for joining and playing the game (query param: `id`) |
+| `/score` | GET | Spectator scoreboard showing live game state (query param: `id`) |
+| `/static/*` | GET | Static assets (CSS, JS) served with immutable cache headers |
+| `/ws/{id}` | WebSocket | Join a game session |
+
+## Game Flow
+
+A game progresses through rounds, each consisting of two phases. At least two players must be connected to start.
+
+### Phases
+
+| Phase | Description |
+|---|---|
+| `start` | Lobby. All players ready up to begin the first round. |
+| `category` | The question's category is shown. Players set their confidence (-1 to 3) and activate effects. The question text is hidden unless the player used the "Expose" effect. All players ready up to proceed. |
+| `answer` | The full question and answer options are revealed. Players pick an answer. All players ready up to resolve. |
+| `resolved` | Results are shown: correct answer, point deltas, and applied effects. All players ready up to advance to the next round. |
+| `done` | All questions exhausted. Final scores are displayed. |
+
+### Scoring
+
+Each correct answer earns points equal to the player's chosen confidence level; each wrong answer loses that amount. Scores cannot drop below zero.
+
+## Effects
+
+Effects are the strategic core of the game. During the `category` phase, players can activate one or more effects before seeing the question. Each effect has a cooldown measured in rounds.
+
+### Self-Targeting Effects
+
+| Effect | Cooldown | Description |
+|---|---|---|
+| Expose | 2 | Reveals the question text during the category phase |
+| Protect | 4 | Blocks all effects targeting this player for the round |
+| Double or Nothing | 10 | If correct, score doubles; if wrong, score drops to zero |
+
+### Opponent-Targeting Effects
+
+These prompt the player to select an opponent:
+
+| Effect | Cooldown | Description |
+|---|---|---|
+| Wrong | 5 | Forces the opponent to fail regardless of their answer |
+| No Points | 4 | Prevents the opponent from earning or losing any points |
+| No Confidence | 3 | Overrides the opponent's confidence to -1 |
+| Absolute Confidence | 3 | Overrides the opponent's confidence to 3 |
+| Steal Points | 5 | Steals all points the opponent earns or loses this round |
+| Swap | 8 | Swaps total scores with the opponent (only triggers if the opponent answers correctly) |
+
+### Effect Resolution Order
+
+Effects are resolved in a fixed order after answers are submitted: protection is applied first (blocking all incoming effects), then fail, zero, min/max, double-or-nothing, steal, and finally swap. When multiple players apply the same effect to the same target, one is chosen randomly. Mutual steals and mutual swaps cancel each other out.
+
+## WebSocket Protocol
+
+The game is built on trust. Each WebSocket connection publishes updates of its player state, which are then pushed to all other clients. The server validates the structure of incoming updates but does not verify game logic (e.g. whether a player's answer is actually correct).
+
+### Client Commands
+
+| Command | Fields | Description |
+|---|---|---|
+| `state` | `{ cmd: 'state' }` | Request the full current game state |
+| `update` | `{ cmd: 'update', name: string, value: PlayerState \| null }` | Update the named player's state, or remove the player if `value` is `null` |
+
+### Server Messages
+
+| Field | Description |
+|---|---|
+| `{ cmd: 'state', state: GameState }` | Full game state including phase, question, round, and all player states |
+| `{ cmd: 'malformed' }` | The client sent an invalid or unrecognized message |
+| `{ cmd: 'unknown-session' }` | The requested session does not exist (connection is closed) |
+
+### Player Identity
+
+Players are identified by name. The game differentiates players solely by the name field in update messages. Logging in with the same name from multiple clients will result in both controlling the same player.
+
+## Session Lifecycle
+
+Sessions are created via the `/new` endpoint and live entirely in memory. A session is automatically deleted after 20 minutes of inactivity (no WebSocket messages). Any WebSocket message resets the inactivity timer. All open WebSocket connections are closed when a session is deleted.
 
 ## Cookies
 
-The client code sets the cookie `quiz-game-last-name` to the last used player name, to retrieve and reuse it on the next refresh.
-
-## WebSocket Protocol
-The game is built on trust, every WebSocket connection just publishes updates of its player state, which are then pushed to all other clients, where necessary.
-
-## Default Questions
-The 230 default questions were sourced from [Open Trivia Database](https://opentdb.com/).
+The client page stores the last used player name in a cookie (`quiz-game-last-name`, 24-hour lifetime) so it can be pre-filled on the next visit.

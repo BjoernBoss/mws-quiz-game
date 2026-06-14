@@ -499,13 +499,13 @@ export const Endpoints = {
  */
 export class QuizGame extends mws.ModuleHandler {
 	private fileStatic: (path: string) => string;
-	private fileData: (path: string) => string;
+	private fileAssets: (path: string) => string;
 	private questionList: QuestionState[];
 	private sessions: Map<string, Session>;
 	private defaultAccess: BurntAccess;
 
 	/**
-	 *	[questions] either describe a path to a json file of questions, or alist of questsions;
+	 *	[questions] either describe a path to a json file of questions, or alist of questsions.
 	 *	If no questions are provided, loads the default questions.
 	 *	[access] describes the default access mask.
 	 */
@@ -513,11 +513,11 @@ export class QuizGame extends mws.ModuleHandler {
 		super('quiz-game');
 
 		this.fileStatic = mws.createPathSelf(import.meta.url, '../static');
-		this.fileData = mws.createPathSelf(import.meta.url, '../data');
+		this.fileAssets = mws.createPathSelf(import.meta.url, '../assets');
 		this.sessions = new Map<string, Session>();
 
 		/* load the actual questions */
-		this.questionList = this.loadQuestions(options?.questions ?? this.fileData('/default.json'));
+		this.questionList = this.loadQuestions(options?.questions ?? this.fileAssets('/default.json'));
 		this.defaultAccess = {
 			create: options?.access?.create ?? false
 		};
@@ -528,7 +528,7 @@ export class QuizGame extends mws.ModuleHandler {
 			return false;
 		if (typeof entry.category != 'string' || entry.category == '')
 			return false;
-		if (typeof entry.correct != 'string' || entry.category == '')
+		if (typeof entry.correct != 'string' || entry.correct == '')
 			return false;
 		if (!Array.isArray(entry.incorrect) || entry.incorrect.length == 0)
 			return false;
@@ -631,7 +631,7 @@ export class QuizGame extends mws.ModuleHandler {
 		return client.makePath(this.cache.immutable(this.name, mws.joinSanitized(Endpoints.static, path)));
 	}
 	private async fetchBody(client: mws.ClientRequest, path: string): Promise<string | null> {
-		const fullPath = this.fileData(path);
+		const fullPath = this.fileAssets(path);
 
 		/* look for the file (will never be an immutable path) */
 		try {

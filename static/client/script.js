@@ -97,6 +97,7 @@ window.onload = function () {
 	_game.htmlRound = document.getElementById('round');
 	_game.htmlReady = document.getElementById('ready');
 	_game.htmlConfidence = document.getElementById('confidence');
+	_game.htmlActual = document.getElementById('actual');
 	_game.htmlDelta = document.getElementById('delta');
 
 	/* splash-screen components */
@@ -244,7 +245,16 @@ _game.applyHeaderAndFooter = function () {
 		_game.htmlRound.innerText = `Round: None / ${_game.state.totalQuestions}`;
 	else
 		_game.htmlRound.innerText = `Round: ${_game.state.round + 1} / ${_game.state.totalQuestions}`;
+
 	_game.htmlConfidence.innerText = `Confidence: ${_game.self.confidence}`;
+
+	if (_game.state.phase == 'resolved' && _game.self.payout != _game.self.confidence) {
+		_game.htmlActual.innerText = ` (Actual: ${_game.self.payout})`;
+		_game.htmlActual.classList.remove('hidden');
+	}
+	else
+		_game.htmlActual.classList.add('hidden');
+
 	if (_game.state.question == null) {
 		_game.htmlCategory.classList.add('hidden');
 		_game.htmlQuestion.classList.add('hidden');
@@ -264,10 +274,7 @@ _game.applyHeaderAndFooter = function () {
 	/* update the points-delta */
 	if (_game.state.phase == 'resolved') {
 		_game.htmlDelta.classList.remove('hidden');
-		let text = (_game.self.delta < 0 ? `Points: ${_game.self.delta}` : `Points: +${_game.self.delta}`);
-		if (_game.self.payout != _game.self.confidence)
-			text += ` | Actual Confidence: ${_game.self.payout}`;
-		_game.htmlDelta.innerText = text;
+		_game.htmlDelta.innerText = `(Points: ${(_game.self.delta < 0 ? '' : '+')}${_game.self.delta})`;
 	}
 	else
 		_game.htmlDelta.classList.add('hidden');
@@ -367,12 +374,12 @@ _game.applyQuestion = function () {
 		let node = _game.htmlGameContent.children[i + 1];
 		let question = _game.state.question;
 
-		/* setup the selection-theme */
+		/* setup the selection-theme (even if the choice was correct, ensure not failed by another player) */
 		if (_game.self.choice != _game.fromScramble[i])
 			node.classList.remove('selected', 'selected-correct', 'selected-wrong');
 		else if (_game.state.phase == 'answer')
 			node.classList.add('selected');
-		else if (_game.fromScramble[i] == 0 && _game.self.applied.fail == null)
+		else if (_game.fromScramble[i] == 0 && _game.self.correct)
 			node.classList.add('selected-correct');
 		else
 			node.classList.add('selected-wrong');

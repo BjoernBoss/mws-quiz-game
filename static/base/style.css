@@ -103,7 +103,8 @@
 }
 
 .main .conditional .failed {
-	padding: 0 1em;
+	width: 100%;
+	text-align: center;
 	color: red;
 	font-size: 1.75em;
 	font-weight: 600;

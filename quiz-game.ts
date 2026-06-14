@@ -7,10 +7,10 @@ import * as libCrypto from "crypto";
 const SESSION_TIMEOUT_MINUTES = 20;
 const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
 
-interface Question {
+interface QuestionState {
 	text: string;
 	category: string;
-	options: [string, string, string, string];
+	options: string[];
 }
 interface GameEffects<T> {
 	expose: T;
@@ -46,12 +46,12 @@ enum GamePhase {
 class GameState {
 	private players: Record<string, PlayerState>;
 	private phase: GamePhase;
-	private question: Question | null;
+	private question: QuestionState | null;
 	private round: number;
-	private remaining: Question[];
+	private remaining: QuestionState[];
 	private total: number;
 
-	constructor(questions: Question[]) {
+	constructor(questions: QuestionState[]) {
 		this.phase = GamePhase.start;
 		this.question = null;
 		this.players = {};
@@ -378,7 +378,7 @@ class Session {
 	private dropSelf: (() => void) | null;
 	private ws: Set<mws.ClientSocket>;
 
-	constructor(questions: Question[], dropSelf: () => void) {
+	constructor(questions: QuestionState[], dropSelf: () => void) {
 		this.state = new GameState(questions);
 		this.ws = new Set<mws.ClientSocket>();
 		this.timeout = null;
@@ -442,13 +442,55 @@ class Session {
 	}
 }
 
+/**
+ *	Interface to define custom questions.
+ *	Must at least have one incorrect answer, and have a caption text and category.
+ */
+export interface Question {
+	text: string;
+	category: string;
+	correct: string;
+	incorrect: string[];
+}
+
+/**
+ *	Endpoints used by the module.
+ *	This mapping can be used to translate components of the module to different paths in the URL space.
+ */
+export const Endpoints = {
+	/** directory containting static assets (sparsely used) */
+	static: '/static',
+
+	/** endpoint to create a new session */
+	welcome: '/',
+
+	/** endpoint to create a new page (automatically redirects to session page) */
+	create: '/new',
+
+	/** endpoint for created sessions (session identified by query paramter 'id') */
+	session: '/session',
+
+	/** endpoint for player clients (session identified by query paramter 'id') */
+	client: '/client',
+
+	/** endpoint for scoreboard clients (session identified by query paramter 'id') */
+	score: '/score'
+}
+
+/**
+ *	Game sessions only live in memory of the module.
+ */
 export class QuizGame extends mws.ModuleHandler {
 	private fileStatic: (path: string) => string;
 	private fileData: (path: string) => string;
-	private jsonQuestions: Question[];
+	private questionList: QuestionState[];
 	private sessions: Map<string, Session>;
 
-	constructor(questionsPath?: string) {
+	/**
+	 *	[questions] either describe a path to a json file of questions, or alist of questsions;
+	 *	If no questions are provided, loads the default questions.
+	 */
+	constructor(questions?: string | Question[]) {
 		super('quiz-game');
 
 		this.fileStatic = mws.createPathSelf(import.meta.url, '../static');
@@ -456,7 +498,7 @@ export class QuizGame extends mws.ModuleHandler {
 		this.sessions = new Map<string, Session>();
 
 		/* load the actual questions */
-		this.jsonQuestions = this.loadQuestions(questionsPath ?? this.fileData('/default.json'));
+		this.questionList = this.loadQuestions(questions ?? this.fileData('/default.json'));
 	}
 
 	private checkQuestionEntry(entry: any): boolean {
@@ -466,7 +508,7 @@ export class QuizGame extends mws.ModuleHandler {
 			return false;
 		if (typeof entry.correct != 'string' || entry.category == '')
 			return false;
-		if (!Array.isArray(entry.incorrect) || entry.incorrect.length != 3)
+		if (!Array.isArray(entry.incorrect) || entry.incorrect.length == 0)
 			return false;
 		for (const opt of entry.incorrect) {
 			if (typeof opt != 'string' || opt == '')
@@ -474,32 +516,35 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 		return true;
 	}
-	private loadQuestions(path: string): Question[] {
-		const out: Question[] = [];
-
-		/* load the file data */
-		let data: any = [];
+	private loadFile(path: string): any[] {
 		try {
 			this.info(`Loading questions from [${path}]`);
-			data = JSON.parse(libFs.readFileSync(path, 'utf-8'));
+			const data = JSON.parse(libFs.readFileSync(path, 'utf-8'));
+
+			if (Array.isArray(data))
+				return data;
+			this.warning(`Malformed question format of [${path}]`);
 		}
 		catch (err: any) {
 			this.error(`Failed to load questions [${path}]: ${err.message}`);
 		}
+		return [];
+	}
+	private loadQuestions(questions: string | Question[]): QuestionState[] {
+		const list = (typeof questions == 'string' ? this.loadFile(questions) : questions);
+		const out: QuestionState[] = [];
 
 		/* parse the question data */
-		if (!Array.isArray(data))
-			this.warning(`Malformed question format of [${path}]`);
-		else for (const entry of data) {
+		for (const entry of list) {
 			if (!this.checkQuestionEntry(entry)) {
-				this.warning(`Malformed question in [${path}]: ${entry.text}`);
+				this.warning(`Malformed question: ${entry.text}`);
 				continue;
 			}
 
 			out.push({
 				text: entry.text,
 				category: entry.category,
-				options: [entry.correct, entry.incorrect[0], entry.incorrect[1], entry.incorrect[2]]
+				options: [entry.correct, ...entry.incorrect]
 			});
 		}
 
@@ -509,7 +554,7 @@ export class QuizGame extends mws.ModuleHandler {
 	private setupSession(): string {
 		let id = libCrypto.randomUUID();
 
-		const session = new Session(this.jsonQuestions, () => {
+		const session = new Session(this.questionList, () => {
 			this.sessions.delete(id);
 			this.info(`Session deleted: ${id}`);
 		});
@@ -585,6 +630,12 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
+		const loadConfig: string = JSON.stringify({
+			manifest: {
+				create: client.makePath(Endpoints.create)
+			}
+		});
+
 		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
@@ -592,7 +643,8 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Start Session!'),
 				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
-				b.LoadStyle(this.staticPath(client, '/base/style.css'))
+				b.LoadStyle(this.staticPath(client, '/base/style.css')),
+				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -603,13 +655,25 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
+		const id = (client.url.searchParams.get('id') ?? '');
+		const loadConfig: string = JSON.stringify({
+			manifest: {
+				client: client.makePath(Endpoints.client),
+				score: client.makePath(Endpoints.score),
+				timeout: SESSION_TIMEOUT_MINUTES
+			},
+			valid: this.sessions.has(id)
+		});
+
 		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
 			head: [
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('New Session Created!'),
-				b.LoadStyle(this.staticPath(client, '/base/style.css'))
+				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
+				b.LoadStyle(this.staticPath(client, '/base/style.css')),
+				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -665,9 +729,9 @@ export class QuizGame extends mws.ModuleHandler {
 			return;
 
 		/* check if a new session has been requested and create it */
-		if (client.path == '/new') {
+		if (client.path == Endpoints.create) {
 			let id = this.setupSession();
-			client.respondSeeOther(client.makePath(`/session?id=${id}`));
+			client.respondSeeOther(client.makePath(`${Endpoints.session}?id=${id}`));
 			return;
 		}
 
@@ -683,13 +747,13 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 
 		/* check if its one of the html endpoints and build them dynamically */
-		if (client.path == '/')
+		if (client.path == Endpoints.welcome)
 			return this.buildStartupPage(client);
-		if (client.path == '/session')
+		if (client.path == Endpoints.session)
 			return this.buildSessionPage(client);
-		if (client.path == '/client')
+		if (client.path == Endpoints.client)
 			return this.buildClientPage(client);
-		if (client.path == '/score')
+		if (client.path == Endpoints.score)
 			return this.buildScorePage(client);
 
 		/* respond to the request by trying to serve the file (discard html requests) */

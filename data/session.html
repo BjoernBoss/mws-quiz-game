@@ -4,15 +4,33 @@
 	<div class="view">
 		<div class="padding">
 			<div class="content">
-				<p class="title">New Session Created!</p>
+				<div class="conditional show" id="select">
+					<p class="title">New Session Created!</p>
+					<div style="height:2em;"></div>
+					<div class="confirm">
+						<div class="button">
+							<a class="clickable" id="player">
+								<p>Player!</p>
+							</a>
+						</div>
+					</div>
+					<div style="height:1.0em;"></div>
+					<div class="confirm">
+						<div class="button">
+							<a class="clickable" id="score">
+								<p>Scoreboard!</p>
+							</a>
+						</div>
+					</div>
+				</div>
+				<div class="conditional" id="invalid">
+					<div style="height:2em;"></div>
+					<div class="failed">
+						Session doest not exist...
+					</div>
+				</div>
 				<div style="height:1.5em;"></div>
-				<p class="detail">Link for Players:</p>
-				<a class="detail" id="player">link</a>
-				<div style="height:1.0em;"></div>
-				<p class="detail">Link to Scoreboard:</p>
-				<a class="detail" id="score">link</a>
-				<div style="height:1.5em;"></div>
-				<p class="detail">Session will be deleted after 20 Minutes of inactivity!</p>
+				<p class="detail" id="timeout"></p>
 				<p class="detail">Sessions can be rejoined by using the same name.</p>
 			</div>
 		</div>
@@ -21,14 +39,19 @@
 
 <script>
 	window.onload = function () {
-		const player = document.getElementById('player');
-		const score = document.getElementById('score');
-		const base = `${location.protocol}//${location.host}${location.pathname}`;
+		const pathClient = (__LOAD_CONFIG__?.manifest?.client ?? '/bad_manifest');
+		const pathScore = (__LOAD_CONFIG__?.manifest?.score ?? '/bad_manifest');
+		const valid = (__LOAD_CONFIG__?.valid ?? false);
+		const timeout = (__LOAD_CONFIG__?.manifest?.timeout ?? 'bad_timeout');
 
-		player.href = new URL(`./client${location.search}`, base).href;
-		score.href = new URL(`./score${location.search}`, base).href;
+		document.getElementById('player').href = `${pathClient}${location.search}`;
+		document.getElementById('score').href = `${pathScore}${location.search}`;
+		document.getElementById('timeout').innerText = `Session will be deleted after ${timeout} Minutes of inactivity!`;
 
-		player.innerText = player.href;
-		score.innerText = score.href;
+		if (!valid) {
+			document.getElementById('invalid').classList.add('show');
+			document.getElementById('select').classList.remove('show');
+		}
+
 	};
 </script>

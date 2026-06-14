@@ -93,6 +93,22 @@
 	margin: 0.2em 0;
 }
 
+.main .conditional {
+	width: 100%;
+	display: none;
+}
+
+.main .conditional.show {
+	display: block;
+}
+
+.main .conditional .failed {
+	padding: 0 1em;
+	color: red;
+	font-size: 1.75em;
+	font-weight: 600;
+}
+
 .content .detail {
 	font-size: 1.2em;
 	font-weight: bold;

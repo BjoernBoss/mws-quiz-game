@@ -2,13 +2,14 @@
 /* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 let _game = {};
 
-const COOKIE_NAME_LIFETIME_MS = 24 * 60 * 60 * 1000;
 const GAME_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
 
 window.onload = function () {
+	const pathSockets = (__LOAD_CONFIG__?.manifest?.sockets ?? '/bad_manifest');
+
 	/* setup the overall state */
 	_game.state = {};
-	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'no-session-id';
+	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'bad_id';
 	_game.name = '';
 	_game.self = null;
 	_game.selectDescription = '';
@@ -125,15 +126,18 @@ window.onload = function () {
 	_game.htmlToggleBoard = document.getElementById('toggle-board');
 
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`./ws/${_game.sessionId}`);
+	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
 	_game.sock.onfailed = (m) => _game.failed(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = null;
 
 	/* initialize the last name from the cookies */
-	let lastName = document.cookie.split('; ').find((v) => v.startsWith('quiz-game-last-name='))?.split('=')[1];
-	if (lastName != null)
-		_game.htmlName.value = lastName;
+	const cookieName = __LOAD_CONFIG__?.manifest?.cookie?.name ?? '';
+	if (cookieName != '') {
+		let lastName = document.cookie.split('; ').find((v) => v.startsWith(`${cookieName}=`))?.split('=')[1];
+		if (lastName != null)
+			_game.htmlName.value = lastName;
+	}
 }
 
 _game.selfChanged = function () {
@@ -504,7 +508,10 @@ _game.login = function () {
 	_game.sock.fetch();
 
 	/* write the last name as a cookie out (lifetime = 24hrs) */
-	document.cookie = `quiz-game-last-name=${_game.name}; expires=${new Date(Date.now() + COOKIE_NAME_LIFETIME_MS).toUTCString()};`;
+	const cookieName = __LOAD_CONFIG__?.manifest?.cookie?.name ?? '';
+	const cookieLifetime = __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0;
+	if (cookieName != '' && cookieLifetime > 0)
+		document.cookie = `${cookieName}=${_game.name}; expires=${new Date(Date.now() + cookieLifetime).toUTCString()};`;
 }
 _game.ready = function () {
 	if (_game.self == null || _game.self.ready || _game.state.phase == 'done' || _game.totalPlayerCount < 2)

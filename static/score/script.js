@@ -3,6 +3,8 @@
 let _game = {};
 
 window.onload = function () {
+	const pathSockets = (__LOAD_CONFIG__?.manifest?.sockets ?? '/bad_manifest');
+
 	/* caption/body components */
 	_game.htmlCategory = document.getElementById('category');
 	_game.htmlQuestion = document.getElementById('question');
@@ -24,10 +26,10 @@ window.onload = function () {
 
 	/* setup the overall state */
 	_game.state = {};
-	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'no-session-id';
+	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'bad_id';
 
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`ws/${_game.sessionId}`);
+	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
 	_game.sock.onfailed = (m) => alert(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = null;

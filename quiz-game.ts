@@ -6,6 +6,8 @@ import * as libCrypto from "crypto";
 
 const SESSION_TIMEOUT_MINUTES = 20;
 const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
+const NAME_COOKIE_NAME = 'quiz-game-last-name';
+const NAME_COOKIE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 interface QuestionState {
 	text: string;
@@ -467,6 +469,9 @@ export const Endpoints = {
 	/** endpoint to create a new page (automatically redirects to session page) */
 	create: '/new',
 
+	/** directory for web-sockets (fully owned, auto-responds with 404) */
+	sockets: '/ws',
+
 	/** endpoint for created sessions (session identified by query paramter 'id') */
 	session: '/session',
 
@@ -606,7 +611,7 @@ export class QuizGame extends mws.ModuleHandler {
 		});
 	}
 	private staticPath(client: mws.ClientRequest, path: string): string {
-		return client.makePath(this.cache.immutable(this.name, path));
+		return client.makePath(this.cache.immutable(this.name, mws.joinSanitized(Endpoints.static, path)));
 	}
 	private async fetchBody(client: mws.ClientRequest, path: string): Promise<string | null> {
 		const fullPath = this.fileData(path);
@@ -684,6 +689,16 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
+		const loadConfig: string = JSON.stringify({
+			manifest: {
+				sockets: client.makePath(Endpoints.sockets),
+				cookie: {
+					name: NAME_COOKIE_NAME,
+					lifetime: NAME_COOKIE_LIFETIME_MS
+				}
+			}
+		});
+
 		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
@@ -694,7 +709,8 @@ export class QuizGame extends mws.ModuleHandler {
 				b.LoadScript(this.staticPath(client, '/common/helper.js')),
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
 				b.LoadScript(this.staticPath(client, '/client/script.js')),
-				b.LoadStyle(this.staticPath(client, '/client/style.css'))
+				b.LoadStyle(this.staticPath(client, '/client/style.css')),
+				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -705,6 +721,12 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
+		const loadConfig: string = JSON.stringify({
+			manifest: {
+				sockets: client.makePath(Endpoints.sockets)
+			}
+		});
+
 		const b = mws.build;
 		const page = new b.HtmlPage({
 			language: 'en',
@@ -714,7 +736,8 @@ export class QuizGame extends mws.ModuleHandler {
 				b.LoadStyle(this.staticPath(client, '/score/style.css')),
 				b.LoadScript(this.staticPath(client, '/common/helper.js')),
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
-				b.LoadScript(this.staticPath(client, '/score/script.js'))
+				b.LoadScript(this.staticPath(client, '/score/script.js')),
+				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -736,8 +759,8 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 
 		/* check if the websocket has been requested */
-		if (client.isInsideOf('/ws')) {
-			let id = mws.childPath('/ws', client.path).substring(1);
+		if (client.isInsideOf(Endpoints.sockets)) {
+			let id = mws.childPath(Endpoints.sockets, client.path).substring(1);
 
 			/* extract the id and try to accept the socket (web-socket protocol handles unknown ids) */
 			const ws = await client.acceptWebSocket();
@@ -756,9 +779,9 @@ export class QuizGame extends mws.ModuleHandler {
 		if (client.path == Endpoints.score)
 			return this.buildScorePage(client);
 
-		/* respond to the request by trying to serve the file (discard html requests) */
-		if (!client.path.toLowerCase().endsWith('.html'))
-			await client.tryRespondFile(this.fileStatic(client.path));
+		/* check if its just static content to be served */
+		if (client.isInsideOf(Endpoints.static))
+			await client.tryRespondFile(this.fileStatic(mws.childPath(Endpoints.static, client.path)));
 	}
 	protected override async handleStop(): Promise<void> {
 		const list: Promise<void>[] = [];

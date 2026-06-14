@@ -31,8 +31,8 @@ interface PlayerState {
 	correct: boolean;
 	delta: number;
 	score: number;
+	applied: string[];
 	effects: GameEffects<string | null>;
-	applied: GameEffects<string | null>;
 	last: GameEffects<number>;
 }
 enum GamePhase {
@@ -72,7 +72,7 @@ class GameState {
 			player.choice = -1;
 			player.correct = false;
 			player.effects = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
-			player.applied = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
+			player.applied = [];
 		}
 	}
 	private applyEffects(): void {
@@ -105,18 +105,18 @@ class GameState {
 			const player = this.players[name];
 
 			/* reset the player for the effect application */
-			player.applied = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
+			player.applied = [];
 			player.payout = player.confidence;
 			player.delta = 0;
 			player.ready = false;
 
 			/* apply the exposure-effect */
 			if (player.effects.expose != null)
-				player.applied.expose = 'True';
+				player.applied.push('Exposed Question');
 
 			/* apply the protect-effect */
 			if (player.effects.protect != null) {
-				player.applied.protect = 'True';
+				player.applied.push('Protected');
 				delete appliedTo[name];
 				continue;
 			}
@@ -128,7 +128,7 @@ class GameState {
 
 			/* apply the failed effect */
 			if (applied.fail != null) {
-				player.applied.fail = applied.fail.join(", ");
+				player.applied.push(`Failed by: ${applied.fail.join(', ')}`);
 				player.correct = false;
 			}
 
@@ -138,7 +138,7 @@ class GameState {
 
 			/* apply the zero effect */
 			if (applied.zero != null) {
-				player.applied.zero = applied.zero.join(", ");
+				player.applied.push(`Zeroed by: ${applied.zero.join(', ')}`);
 				player.payout = 0;
 				continue;
 			}
@@ -155,10 +155,10 @@ class GameState {
 
 			/* apply the chosen effect */
 			if (applied.min != null)
-				player.applied.min = applied.min.join(", ");
+				player.applied.push(`Confidence -1 by: ${applied.min.join(', ')}`);
 			if (applied.max != null)
-				player.applied.max = applied.max.join(", ");
-			player.payout = (player.applied.max != null ? 3 : -1);
+				player.applied.push(`Confidence 3 by: ${applied.max.join(', ')}`);
+			player.payout = (applied.max != null ? 3 : -1);
 		}
 
 		/* compute the points each player will earn and apply double-or-nothing */
@@ -167,7 +167,7 @@ class GameState {
 
 			/* apply the double-or-nothing effect */
 			if (player.effects.double != null) {
-				player.applied.double = 'True';
+				player.applied.push('Double or Nothing');
 				player.delta = (player.correct ? player.score : -player.score);
 			}
 			else
@@ -190,11 +190,11 @@ class GameState {
 
 			/* select the thief and apply him */
 			const thief = thieves[Math.floor(Math.random() * thieves.length)];
-			this.players[name].applied.steal = thief;
+			this.players[name].applied.push(`Points stolen by: ${thief}`);
 
 			/* check if the thief and player stole from each other */
 			if ((thief in appliedTo) && appliedTo[thief].steal != null && appliedTo[thief].steal.includes(name))
-				this.players[thief].applied.steal = name;
+				this.players[thief].applied.push(`Points stolen back by: ${name}`);
 
 			/* steal the points */
 			else {
@@ -227,11 +227,11 @@ class GameState {
 
 			/* select the other player and apply him */
 			const other = swaps[Math.floor(Math.random() * swaps.length)];
-			this.players[name].applied.swap = other;
+			this.players[name].applied.push(`Points swapped with: ${other}`);
 
 			/* check if the thief and player swapped each other */
 			if ((other in appliedTo) && appliedTo[other].swap != null && appliedTo[other].swap.includes(name))
-				this.players[other].applied.swap = name;
+				this.players[other].applied.push(`Points swapped back with: ${name}`);
 
 			/* swap the points */
 			else {
@@ -323,10 +323,16 @@ class GameState {
 			for (const name of ['expose', 'double', 'protect', 'fail', 'swap', 'zero', 'min', 'max', 'steal']) {
 				if (typeof state.effects[name] != 'string' && state.effects[name] != null)
 					return false;
-				if (typeof state.applied[name] != 'string' && state.applied[name] != null)
-					return false;
 				if (typeof state.last[name] != 'number')
 					return false;
+			}
+			if (!Array.isArray(state.applied))
+				return false;
+			const applied = [];
+			for (const entry of state.applied) {
+				if (typeof entry != 'string')
+					return false;
+				applied.push(entry);
 			}
 
 			this.players[name] = {
@@ -337,6 +343,7 @@ class GameState {
 				choice: state.choice,
 				delta: state.delta,
 				score: state.score,
+				applied,
 				effects: {
 					expose: state.effects.expose,
 					double: state.effects.double,
@@ -347,17 +354,6 @@ class GameState {
 					min: state.effects.min,
 					max: state.effects.max,
 					steal: state.effects.steal
-				},
-				applied: {
-					expose: state.applied.expose,
-					double: state.applied.double,
-					protect: state.applied.protect,
-					fail: state.applied.fail,
-					swap: state.applied.swap,
-					zero: state.applied.zero,
-					min: state.applied.min,
-					max: state.applied.max,
-					steal: state.applied.steal
 				},
 				last: {
 					expose: state.last.expose,
@@ -631,9 +627,10 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Normal Player!'),
 				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
-				b.LoadStyle(this.staticPath(client, '/client/style.css')),
+				b.LoadScript(this.staticPath(client, '/common/helper.js')),
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
-				b.LoadScript(this.staticPath(client, '/client/script.js'))
+				b.LoadScript(this.staticPath(client, '/client/script.js')),
+				b.LoadStyle(this.staticPath(client, '/client/style.css'))
 			],
 			body: b.Embed(body, true)
 		});
@@ -651,6 +648,7 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Scoreboard!'),
 				b.LoadStyle(this.staticPath(client, '/score/style.css')),
+				b.LoadScript(this.staticPath(client, '/common/helper.js')),
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
 				b.LoadScript(this.staticPath(client, '/score/script.js'))
 			],

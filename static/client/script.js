@@ -69,7 +69,7 @@ window.onload = function () {
 		delta: 0,
 		effects: {},
 		last: {},
-		applied: {},
+		applied: [],
 	};
 	_game.fromScramble = [];
 	_game.lastScramble = '';
@@ -78,7 +78,6 @@ window.onload = function () {
 	for (const key in _game.effects) {
 		_game.effects[key].html = document.getElementById(key);
 		_game.empty.effects[key] = null;
-		_game.empty.applied[key] = null;
 		_game.empty.last[key] = -100;
 	}
 
@@ -288,72 +287,7 @@ _game.applyScore = function () {
 	_game.htmlToggleBoard.innerText = 'Return to Game';
 	_game.htmlReady.classList.add('hidden');
 
-	/* collect the list of all players and sort them by their score */
-	let list = [];
-	for (const key in _game.state.players)
-		list.push([key, _game.state.players[key].score]);
-	list.sort((a, b) => ((a[1] < b[1] || (a[1] == b[1] && a[0] > b[0])) ? 1 : -1));
-
-	/* add the list of players */
-	for (let i = 0; i < list.length; ++i) {
-		/* check if the element already exists or needs to be created */
-		if (i >= _game.htmlScoreContent.children.length) {
-			let node = document.createElement('div');
-			_game.htmlScoreContent.appendChild(node);
-			node.classList.add('score');
-		}
-		let node = _game.htmlScoreContent.children[i];
-		let player = _game.state.players[list[i][0]];
-		let count = 0;
-		let makeNext = function () {
-			if (count >= node.children.length) {
-				let temp = document.createElement('p');
-				node.appendChild(temp);
-				temp.classList.add(count == 0 ? 'name' : 'detail');
-			}
-			return node.children[count++];
-		};
-
-		/* add the name and score and ready-flag (first has always name-style) */
-		makeNext().innerText = `Name: ${list[i][0]}`;
-		makeNext().innerText = `Score: ${player.score} (Previously: ${player.score - player.delta})`;
-		makeNext().innerText = `Ready: ${player.ready ? 'True' : 'False'}`;
-
-		/* add the result */
-		if (_game.state.phase == 'resolved') {
-			let next = makeNext();
-			if (player.choice == -1)
-				next.innerText = `Result: None`;
-			else
-				next.innerText = `Result: ${_game.state.question.options[player.choice]} (${player.correct ? 'Correct' : 'Incorrect'})`;
-		}
-
-		/* add the confidence */
-		if (_game.state.phase == 'resolved') {
-			let text = `Confidence: ${player.payout}`;
-			if (player.confidence != player.payout)
-				text += ` (Wanted: ${player.confidence})`;
-			makeNext().innerText = text;
-		}
-
-		/* add the delta */
-		if (_game.state.phase == 'resolved')
-			makeNext().innerText = `Points: ${player.delta < 0 ? '' : '+'}${player.delta}`;
-
-		/* add the effects flags */
-		for (const key in player.effects) {
-			if (player.applied[key] != null)
-				makeNext().innerText = `${_game.effects[key].description}: ${player.applied[key]}`;
-		}
-
-		/* remove any remaining children */
-		while (node.children.length > count)
-			node.lastChild.remove();
-	}
-
-	/* remove the remaining children */
-	while (_game.htmlScoreContent.children.length > list.length)
-		_game.htmlScoreContent.lastChild.remove();
+	UpdateScoreboard(_game.state, _game.htmlScoreContent);
 }
 _game.applySelection = function () {
 	_game.screen('select');

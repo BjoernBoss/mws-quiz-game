@@ -594,7 +594,6 @@ export class QuizGame extends mws.ModuleHandler {
 		session.addPlayer(client);
 		client.log(`Websocket connected`);
 		let connectionName = '', nameLogTag = client.tagLog('');
-		let playerId: string | null = null;
 
 		/* register the callbacks */
 		client.on('data', (msg) => {
@@ -610,24 +609,12 @@ export class QuizGame extends mws.ModuleHandler {
 				else if (parsed.cmd == 'state')
 					result = { cmd: 'state', state: session.queryState() };
 
-				/* check if its a login */
-				else if (parsed.cmd == 'login') {
-					if (typeof parsed.id != 'string' || parsed.id == '')
-						result = { cmd: 'malformed' };
-					else if (playerId != null)
-						result = { cmd: 'already-logged-in' };
-					else {
-						playerId = parsed.id;
-						client.log(`Logged in as: ${playerId}`);
-					}
-				}
-
 				/* check if its an update command */
 				else if (parsed.cmd == 'update') {
-					if (playerId == null)
-						result = { cmd: 'not-logged-in' };
+					if (typeof parsed.id != 'string' || parsed.id == '')
+						result = { cmd: 'malformed' };
 					else {
-						const temp = session.updatePlayer(playerId, parsed.value);
+						const temp = session.updatePlayer(parsed.id, parsed.value);
 						if (temp != null)
 							result = { cmd: temp };
 
@@ -757,6 +744,7 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Normal Player!'),
 				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
+				b.LoadStyle(this.staticPath(client, '/common/header.css')),
 				b.LoadScript(this.staticPath(client, '/common/helper.js')),
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
 				b.LoadScript(this.staticPath(client, '/client/script.js')),
@@ -785,6 +773,7 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Scoreboard!'),
 				b.LoadStyle(this.staticPath(client, '/score/style.css')),
+				b.LoadStyle(this.staticPath(client, '/common/header.css')),
 				b.LoadScript(this.staticPath(client, '/common/helper.js')),
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
 				b.LoadScript(this.staticPath(client, '/score/script.js')),

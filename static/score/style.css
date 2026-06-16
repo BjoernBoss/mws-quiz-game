@@ -10,43 +10,6 @@
 	user-select: none;
 }
 
-.header {
-	background-color: rgb(158, 158, 158);
-	flex-grow: 0;
-	flex-direction: column;
-	padding: 1em;
-	display: flex;
-	justify-content: center;
-	align-items: center;
-	font-weight: bold;
-	text-align: center;
-	color: black;
-}
-
-.header .details {
-	display: flex;
-	flex-direction: row;
-	margin: 0;
-	border-style: solid;
-	border-width: 0 0 2px 0;
-	font-size: 1.5em;
-}
-
-.header .small {
-	margin-top: 0.5em;
-	font-size: 1.8em;
-}
-
-@media (max-width: 640px) {
-	.header .small {
-		font-size: 1.2em;
-	}
-
-	.header .details {
-		font-size: 1em;
-	}
-}
-
 .core-separator {
 	height: 0.25em;
 	min-height: 0.25em;

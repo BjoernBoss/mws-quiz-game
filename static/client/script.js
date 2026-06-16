@@ -11,7 +11,7 @@ window.onload = function () {
 	_game.state = {};
 	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'bad_id';
 	_game.playerId = '';
-	_game.loggedIn = '';
+	_game.loggedIn = null;
 	_game.self = null;
 	_game.selectDescription = '';
 	_game.selectCallback = null;
@@ -93,6 +93,7 @@ window.onload = function () {
 	/* caption/footer components */
 	_game.htmlMain = document.getElementById('main');
 	_game.htmlSelfName = document.getElementById('self-name');
+	_game.htmlText = document.getElementById('text');
 	_game.htmlCategory = document.getElementById('category');
 	_game.htmlQuestion = document.getElementById('question');
 	_game.htmlScore = document.getElementById('score');
@@ -128,15 +129,15 @@ window.onload = function () {
 	_game.htmlScoreContent = document.getElementById('score-content');
 	_game.htmlToggleBoard = document.getElementById('toggle-board');
 
-	/* load the player id or check if a new id needs to be created and write the cookie back */
-	_game.playerId = (_game.getCookie('player-id') ?? crypto.randomUUID());
-	_game.setCookie('player-id', _game.playerId, __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
-
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`, _game.playerId);
+	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
 	_game.sock.onfailed = (m) => _game.failed(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = null;
+
+	/* load the player id or check if a new id needs to be created and write the cookie back */
+	_game.playerId = (_game.getCookie('player-id') ?? crypto.randomUUID());
+	_game.setCookie('player-id', _game.playerId, __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
 
 	/* initialize the last name from the cookies */
 	const lastName = _game.getCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '');
@@ -161,12 +162,12 @@ _game.selfChanged = function (update) {
 	if (update)
 		_game.applyState(null);
 	++_game.self.stamp;
-	_game.sock.sync(_game.self);
+	_game.sock.sync(_game.playerId, _game.self);
 }
 _game.applyState = function (state) {
 	if (state != null)
 		_game.state = state;
-	if (_game.loggedIn == '')
+	if (_game.loggedIn == null)
 		return;
 	if (state != null)
 		console.log('Applying received state');
@@ -177,7 +178,7 @@ _game.applyState = function (state) {
 		++_game.totalPlayerCount;
 
 	/* check if the player state already exists or if its outdated */
-	let dirty = false, initial = (_game.self == null);
+	let dirty = false;
 	if (_game.playerId in _game.state.players) {
 		if (_game.self == null || _game.self.stamp <= _game.state.players[_game.playerId].stamp)
 			_game.self = _game.state.players[_game.playerId];
@@ -193,9 +194,16 @@ _game.applyState = function (state) {
 		return;
 	}
 
-	/* update the player name and check if the state needs to be uploaded again */
-	if (initial && _game.self.name != _game.loggedIn)
-		_game.self.name = _game.loggedIn, dirty = true;
+	/* update the player name after a login */
+	if (_game.self.name != _game.loggedIn.name) {
+		if (_game.loggedIn.applied)
+			_game.loggedIn.name = _game.self.name;
+		else
+			_game.self.name = _game.loggedIn.name, dirty = true;
+	}
+	_game.loggedIn.applied = true;
+
+	/* check if the state needs to be uploaded again */
 	if (dirty)
 		_game.selfChanged(false);
 
@@ -285,20 +293,17 @@ _game.applyHeaderAndFooter = function () {
 	else
 		_game.htmlActual.classList.add('hidden');
 
-	if (_game.state.question == null) {
-		_game.htmlCategory.classList.add('hidden');
+	if (_game.state.question == null)
 		_game.htmlQuestion.classList.add('hidden');
-	}
 	else {
-		_game.htmlCategory.classList.remove('hidden');
-		_game.htmlCategory.innerText = `Category: ${_game.state.question.category}`;
+		_game.htmlQuestion.classList.remove('hidden');
 
-		if (_game.state.phase != 'category' || _game.self.effects.expose != null) {
-			_game.htmlQuestion.classList.remove('hidden');
-			_game.htmlQuestion.innerText = _game.state.question.text;
-		}
+		_game.htmlCategory.innerText = _game.state.question.category;
+
+		if (_game.state.phase != 'category' || _game.self.effects.expose != null)
+			_game.htmlText.innerText = _game.state.question.text;
 		else
-			_game.htmlQuestion.classList.add('hidden');
+			_game.htmlText.innerText = '???';
 	}
 
 	/* update the points-delta */
@@ -338,7 +343,7 @@ _game.applySelection = function () {
 	let list = [];
 	for (const id in _game.state.players) {
 		if (id != _game.playerId)
-			list.push([id, _game.state.players[key].score]);
+			list.push([id, _game.state.players[id].score]);
 	}
 	list.sort((a, b) => ((a[1] < b[1] || (a[1] == b[1] && a[0] > b[0])) ? 1 : -1));
 
@@ -460,8 +465,8 @@ _game.applySetup = function () {
 	_game.htmlConfidenceSlider.value = _game.self.confidence;
 
 	/* update the effect buttons */
-	for (const key in _game.effects)
-		_game.applyEffect(key);
+	for (const effName in _game.effects)
+		_game.applyEffect(effName);
 }
 _game.applyEffect = function (effName) {
 	const can = _game.canEffect(effName, false);
@@ -473,7 +478,7 @@ _game.applyEffect = function (effName) {
 		effect.html.classList.add('disabled');
 
 	if (_game.self.effects[effName] != null && ('select' in effect))
-		effect.html.children[0].children[2].innerText = `Selected: ${_game.self.effects[effName]}`;
+		effect.html.children[0].children[2].innerText = `Selected: ${_game.state.players[_game.self.effects[effName]].name}`;
 	else if (can)
 		effect.html.children[0].children[2].innerText = `Timed Out for ${effect.timeout} Rounds`;
 	else
@@ -512,7 +517,7 @@ _game.failed = function (msg) {
 	_game.htmlWarningText.innerText = msg;
 	_game.selectDescription = '';
 	_game.viewScore = false;
-	_game.loggedIn = '';
+	_game.loggedIn = null;
 	_game.self = null;
 }
 _game.login = function () {
@@ -542,11 +547,21 @@ _game.login = function () {
 	}
 
 	/* extract the parameter and sync the game up */
-	_game.loggedIn = name;
-	_game.sock.fetch();
+	_game.loggedIn = { name, applied: false };
+	if (_game.self == null)
+		_game.sock.fetch();
+	else {
+		_game.loggedIn.applied = true;
+		if (_game.self.name == name)
+			_game.applyState(null);
+		else {
+			_game.self.name = name;
+			_game.selfChanged(true);
+		}
+	}
 
 	/* write the last name as a cookie out */
-	_game.setCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '', __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
+	_game.setCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '', name, __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
 }
 _game.ready = function () {
 	if (_game.self == null || _game.self.ready || _game.state.phase == 'done' || _game.totalPlayerCount < 2)
@@ -580,13 +595,13 @@ _game.activate = function (effName) {
 	if (!_game.canEffect(effName, true))
 		return;
 	if (!('select' in _game.effects[effName])) {
-		_game.doEffect(effName, _game.loggedIn);
+		_game.doEffect(effName, _game.loggedIn.name);
 		return;
 	}
 
 	_game.selectDescription = _game.effects[effName].select;
 	_game.selectCallback = function (id) {
-		if (v != null && _game.canEffect(effName, true))
+		if (id != null && _game.canEffect(effName, true))
 			_game.doEffect(effName, id);
 	};
 	_game.applyState(null);
@@ -603,7 +618,7 @@ _game.remove = function () {
 	}
 	else {
 		delete _game.state.players[_game.playerId];
-		_game.sock.sync(null);
+		_game.sock.sync(_game.playerId, null);
 		_game.failed('Player has been removed');
 	}
 }

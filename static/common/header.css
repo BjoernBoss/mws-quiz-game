@@ -1,0 +1,57 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
+.header {
+	background-color: rgb(158, 158, 158);
+	flex-grow: 0;
+	flex-direction: column;
+	padding: 0.6em;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	font-weight: bold;
+	text-align: center;
+	color: black;
+}
+
+.header .question {
+	width: stretch;
+	background-color: #c0c0c0;
+	border-radius: 1em;
+	margin-top: 0.6em;
+	padding: 0.4em;
+	box-shadow: 0 0 0.25em black inset;
+}
+
+.header .question .text {
+	font-size: 1.6em;
+}
+
+.header .question .category {
+	margin: 0.25em 0;
+	font-size: 1em;
+	font-style: italic;
+}
+
+.header .question .solution {
+	font-size: 1.5em;
+	color: #208020;
+}
+
+.header .details {
+	display: flex;
+	flex-direction: row;
+	margin: 0;
+	border-style: solid;
+	border-width: 0 0 2px 0;
+	font-size: 1.5em;
+}
+
+@media (max-width: 640px) {
+	.header .question {
+		font-size: 0.8em;
+	}
+
+	.header .details {
+		font-size: 1em;
+	}
+}

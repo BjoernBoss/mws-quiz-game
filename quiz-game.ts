@@ -26,6 +26,8 @@ interface GameEffects<T> {
 	steal: T;
 }
 interface PlayerState {
+	name: string;
+	stamp: number;
 	ready: boolean;
 	confidence: number;
 	payout: number;
@@ -44,6 +46,7 @@ enum GamePhase {
 	resolved = 'resolved',
 	done = 'done'
 }
+type ParsedPlayer = 'valid' | 'outdated' | 'malformed';
 
 class GameState {
 	private players: Record<string, PlayerState>;
@@ -62,13 +65,13 @@ class GameState {
 		this.total = this.remaining.length;
 	}
 	private resetPlayerReady(): void {
-		for (const name in this.players)
-			this.players[name].ready = false;
+		for (const id in this.players)
+			this.players[id].ready = false;
 	}
 	private resetPlayersForPhase(): void {
 		/* reset the player states for the next phase */
-		for (const name in this.players) {
-			let player = this.players[name];
+		for (const id in this.players) {
+			const player = this.players[id];
 			player.ready = false;
 			player.confidence = 1;
 			player.choice = -1;
@@ -82,29 +85,30 @@ class GameState {
 
 		/* collect the list of players who applied each effect to each other */
 		const targetEffects: (keyof GameEffects<unknown>)[] = ['fail', 'swap', 'zero', 'min', 'max', 'steal'];
-		for (const name in this.players) {
-			const player = this.players[name];
+		for (const id in this.players) {
+			const player = this.players[id];
+
 			for (const effect of targetEffects) {
-				const victim = player.effects[effect];
-				if (victim == null)
+				const idVictim = player.effects[effect];
+				if (idVictim == null)
 					continue;
 
 				/* check if the victim exists and add it the the inverse-map */
-				if (!(victim in appliedTo))
-					appliedTo[victim] = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
-				const applied = appliedTo[victim];
+				if (!(idVictim in appliedTo))
+					appliedTo[idVictim] = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
+				const applied = appliedTo[idVictim];
 
 				/* add the player as source for the given effect */
 				if (applied[effect] == null)
 					applied[effect] = [];
-				applied[effect]!.push(name);
+				applied[effect].push(id);
 			}
 		}
 
 		/* iterate over all players again and reset them, apply the protections, exposures, fail,
 		*	zero, min, max, and clear swaps for players who failed to answer correctly */
-		for (const name in this.players) {
-			const player = this.players[name];
+		for (const id in this.players) {
+			const player = this.players[id];
 
 			/* reset the player for the effect application */
 			player.applied = [];
@@ -119,18 +123,19 @@ class GameState {
 			/* apply the protect-effect */
 			if (player.effects.protect != null) {
 				player.applied.push('Protected');
-				delete appliedTo[name];
+				delete appliedTo[id];
 				continue;
 			}
 
 			/* check if any effects are applied */
-			const applied = appliedTo[name];
+			const applied = appliedTo[id];
 			if (applied == null)
 				continue;
 
 			/* apply the failed effect */
 			if (applied.fail != null) {
-				player.applied.push(`Failed by: ${applied.fail.join(', ')}`);
+				const list = applied.fail.map((v) => this.players[v].name).join(', ');
+				player.applied.push(`Failed by: ${list}`);
 				player.correct = false;
 			}
 
@@ -140,7 +145,8 @@ class GameState {
 
 			/* apply the zero effect */
 			if (applied.zero != null) {
-				player.applied.push(`Zeroed by: ${applied.zero.join(', ')}`);
+				const list = applied.zero.map((v) => this.players[v].name).join(', ');
+				player.applied.push(`Zeroed by: ${list}`);
 				player.payout = 0;
 				continue;
 			}
@@ -156,16 +162,20 @@ class GameState {
 			}
 
 			/* apply the chosen effect */
-			if (applied.min != null)
-				player.applied.push(`Confidence -1 by: ${applied.min.join(', ')}`);
-			if (applied.max != null)
-				player.applied.push(`Confidence 3 by: ${applied.max.join(', ')}`);
+			if (applied.min != null) {
+				const list = applied.min.map((v) => this.players[v].name).join(', ');
+				player.applied.push(`Confidence -1 by: ${list}`);
+			}
+			if (applied.max != null) {
+				const list = applied.max.map((v) => this.players[v].name).join(', ');
+				player.applied.push(`Confidence 3 by: ${list}`);
+			}
 			player.payout = (applied.max != null ? 3 : -1);
 		}
 
 		/* compute the points each player will earn and apply double-or-nothing */
-		for (const name in this.players) {
-			const player = this.players[name];
+		for (const id in this.players) {
+			const player = this.players[id];
 
 			/* apply the double-or-nothing effect */
 			if (player.effects.double != null) {
@@ -181,82 +191,82 @@ class GameState {
 		while (stealFrom.length > 0) {
 			/* pick the next entry to process and remove the index from the open list */
 			const index = Math.floor(Math.random() * stealFrom.length);
-			const name = stealFrom[index];
+			const id = stealFrom[index];
 			stealFrom.splice(index, 1);
 
-			/* check if the key can be removed, as no steals are registered for it */
-			if (appliedTo[name].steal == null)
+			/* check if the key can be skipped, as no steals are registered for it */
+			if (appliedTo[id].steal == null)
 				continue;
-			const thieves = appliedTo[name].steal;
-			appliedTo[name].steal = null;
+			const thieves = appliedTo[id].steal;
+			appliedTo[id].steal = null;
 
 			/* select the thief and apply him */
-			const thief = thieves[Math.floor(Math.random() * thieves.length)];
-			this.players[name].applied.push(`Points stolen by: ${thief}`);
+			const idThief = thieves[Math.floor(Math.random() * thieves.length)];
+			this.players[id].applied.push(`Points stolen by: ${this.players[idThief].name}`);
 
 			/* check if the thief and player stole from each other */
-			if ((thief in appliedTo) && appliedTo[thief].steal != null && appliedTo[thief].steal.includes(name))
-				this.players[thief].applied.push(`Points stolen back by: ${name}`);
+			if ((idThief in appliedTo) && appliedTo[idThief].steal != null && appliedTo[idThief].steal.includes(id))
+				this.players[idThief].applied.push(`Points stolen back by: ${this.players[id].name}`);
 
 			/* steal the points */
 			else {
-				this.players[thief].delta += this.players[name].delta;
-				this.players[name].delta = 0;
+				this.players[idThief].delta += this.players[id].delta;
+				this.players[id].delta = 0;
 			}
 
 			/* remove the thief to prevent double-steal */
-			if (thief in appliedTo)
-				appliedTo[thief].steal = null;
+			if (idThief in appliedTo)
+				appliedTo[idThief].steal = null;
 		}
 
 		/* compute the overall new points */
-		for (const name in this.players)
-			this.players[name].score = Math.max(0, this.players[name].score + this.players[name].delta);
+		for (const id in this.players)
+			this.players[id].score = Math.max(0, this.players[id].score + this.players[id].delta);
 
 		/* apply the swaps randomly (ensure no swap-chains are possible) */
 		const swapWith = Object.keys(appliedTo);
 		while (swapWith.length > 0) {
 			/* pick the next entry to process and remove the index from the open list */
 			const index = Math.floor(Math.random() * swapWith.length);
-			const name = swapWith[index];
+			const id = swapWith[index];
 			swapWith.splice(index, 1);
 
 			/* check if the key can be removed, as no swaps are registered for it */
-			if (appliedTo[name].swap == null)
+			if (appliedTo[id].swap == null)
 				continue;
-			const swaps = appliedTo[name].swap;
-			appliedTo[name].swap = null;
+			const swaps = appliedTo[id].swap;
+			appliedTo[id].swap = null;
 
 			/* select the other player and apply him */
-			const other = swaps[Math.floor(Math.random() * swaps.length)];
-			this.players[name].applied.push(`Points swapped with: ${other}`);
+			const idOther = swaps[Math.floor(Math.random() * swaps.length)];
+			this.players[id].applied.push(`Points swapped with: ${this.players[idOther].name}`);
 
 			/* check if the thief and player swapped each other */
-			if ((other in appliedTo) && appliedTo[other].swap != null && appliedTo[other].swap.includes(name))
-				this.players[other].applied.push(`Points swapped back with: ${name}`);
+			if ((idOther in appliedTo) && appliedTo[idOther].swap != null && appliedTo[idOther].swap.includes(id))
+				this.players[idOther].applied.push(`Points swapped back with: ${this.players[id].name}`);
 
 			/* swap the points */
 			else {
-				const namePoints = this.players[name].score;
-				const otherPoints = this.players[other].score;
+				const thisPoints = this.players[id].score;
+				const otherPoints = this.players[idOther].score;
 
-				this.players[name].score = otherPoints;
-				this.players[name].delta += (otherPoints - namePoints);
+				this.players[id].score = otherPoints;
+				this.players[id].delta += (otherPoints - thisPoints);
 
 
-				this.players[other].score = namePoints;
-				this.players[other].delta += (namePoints - otherPoints);
+				this.players[idOther].score = thisPoints;
+				this.players[idOther].delta += (thisPoints - otherPoints);
 			}
 
 			/* remove the other person to prevent double-swaps */
-			if (other in appliedTo)
-				appliedTo[other].swap = null;
+			if (idOther in appliedTo)
+				appliedTo[idOther].swap = null;
 		}
 	}
 	public advanceStage(): void {
 		/* check if all players are valid */
-		for (const name in this.players) {
-			if (!this.players[name].ready)
+		for (const id in this.players) {
+			if (!this.players[id].ready)
 				return;
 		}
 		if (Object.keys(this.players).length < 2)
@@ -295,83 +305,78 @@ class GameState {
 		this.applyEffects();
 		this.phase = GamePhase.resolved;
 	}
-	public makeState() {
+	public makeState(): any {
 		return {
-			cmd: 'state',
-			state: {
-				phase: this.phase,
-				question: this.question,
-				totalQuestions: this.total,
-				players: this.players,
-				round: this.round
-			}
+			phase: this.phase,
+			question: this.question,
+			totalQuestions: this.total,
+			players: this.players,
+			round: this.round
 		};
 	}
-	public updatePlayer(name: string, state: any): boolean {
-		if (!name.match(VALID_NAME_REGEX))
-			return false;
-
-		if (state === null)
-			delete this.players[name];
-		else {
-			if (typeof state.ready != 'boolean' || typeof state.correct != 'boolean')
-				return false;
-			if (typeof state.confidence != 'number' || typeof state.payout != 'number' || typeof state.choice != 'number')
-				return false;
-			if (typeof state.delta != 'number' || typeof state.score != 'number')
-				return false;
-			if (typeof state.effects != 'object' || typeof state.applied != 'object')
-				return false;
-			for (const name of ['expose', 'double', 'protect', 'fail', 'swap', 'zero', 'min', 'max', 'steal']) {
-				if (typeof state.effects[name] != 'string' && state.effects[name] != null)
-					return false;
-				if (typeof state.last[name] != 'number')
-					return false;
-			}
-			if (!Array.isArray(state.applied))
-				return false;
-			const applied = [];
-			for (const entry of state.applied) {
-				if (typeof entry != 'string')
-					return false;
-				applied.push(entry);
-			}
-
-			this.players[name] = {
-				ready: state.ready,
-				correct: state.correct,
-				confidence: state.confidence,
-				payout: state.payout,
-				choice: state.choice,
-				delta: state.delta,
-				score: state.score,
-				applied,
-				effects: {
-					expose: state.effects.expose,
-					double: state.effects.double,
-					protect: state.effects.protect,
-					fail: state.effects.fail,
-					swap: state.effects.swap,
-					zero: state.effects.zero,
-					min: state.effects.min,
-					max: state.effects.max,
-					steal: state.effects.steal
-				},
-				last: {
-					expose: state.last.expose,
-					double: state.last.double,
-					protect: state.last.protect,
-					fail: state.last.fail,
-					swap: state.last.swap,
-					zero: state.last.zero,
-					min: state.last.min,
-					max: state.last.max,
-					steal: state.last.steal
-				}
-			};
+	public updatePlayer(id: string, state: any): ParsedPlayer {
+		/* check if the player should be removed */
+		if (state === null) {
+			delete this.players[id];
+			this.advanceStage();
+			return 'valid';
 		}
+
+		if (typeof state.stamp != 'number')
+			return 'malformed';
+		if (typeof state.name != 'string' || !state.name.match(VALID_NAME_REGEX))
+			return 'malformed';
+		if (typeof state.ready != 'boolean' || typeof state.correct != 'boolean')
+			return 'malformed';
+		if (typeof state.confidence != 'number' || typeof state.payout != 'number' || typeof state.choice != 'number')
+			return 'malformed';
+		if (typeof state.delta != 'number' || typeof state.score != 'number')
+			return 'malformed';
+		if (typeof state.effects != 'object' || typeof state.applied != 'object')
+			return 'malformed';
+		if (!Array.isArray(state.applied))
+			return 'malformed';
+
+		const applied = [];
+		for (const entry of state.applied) {
+			if (typeof entry != 'string')
+				return 'malformed';
+			applied.push(entry);
+		}
+
+		const last: GameEffects<number> = { expose: 0, double: 0, protect: 0, fail: 0, swap: 0, zero: 0, min: 0, max: 0, steal: 0 };
+		const effects: GameEffects<string | null> = { expose: null, double: null, protect: null, fail: null, swap: null, zero: null, min: null, max: null, steal: null };
+		for (const name of ['expose', 'double', 'protect', 'fail', 'swap', 'zero', 'min', 'max', 'steal']) {
+			if (typeof state.effects[name] != 'string' && state.effects[name] != null)
+				return 'malformed';
+			if (typeof state.last[name] != 'number')
+				return 'malformed';
+			effects[name as keyof GameEffects<unknown>] = state.effects[name];
+			last[name as keyof GameEffects<unknown>] = state.last[name];
+		}
+
+		/* check if the update is oudated */
+		if (id in this.players && this.players[id].stamp >= state.stamp)
+			return 'outdated';
+
+		/* copy the state to ensure it is not tainted with other received data */
+		this.players[id] = {
+			name: state.name,
+			stamp: state.stamp,
+			ready: state.ready,
+			correct: state.correct,
+			confidence: state.confidence,
+			payout: state.payout,
+			choice: state.choice,
+			delta: state.delta,
+			score: state.score,
+			applied,
+			effects,
+			last
+		};
+
 		this.advanceStage();
-		return true;
+		return 'valid';
 	}
 }
 class Session {
@@ -392,15 +397,10 @@ class Session {
 	private selfAlive(): void {
 		if (this.timeout != null)
 			clearTimeout(this.timeout);
-		this.timeout = (this.dropSelf == null ? null : setTimeout(() => this.drop(), SESSION_TIMEOUT_MINUTES * 60 * 1000));
-	}
-	private syncStateChange(): void {
-		this.selfAlive();
-		const msg = JSON.stringify(this.state.makeState());
-		this.ws.forEach(ws => ws.send(msg));
+		this.timeout = (this.dropSelf == null ? null : setTimeout(() => this.dropSession(), SESSION_TIMEOUT_MINUTES * 60 * 1000));
 	}
 
-	public async drop(): Promise<void> {
+	public async dropSession(): Promise<void> {
 		if (this.timeout != null)
 			clearTimeout(this.timeout);
 		this.timeout = null;
@@ -416,31 +416,26 @@ class Session {
 		this.ws.forEach((ws) => promises.push(ws.close()));
 		await Promise.all(promises);
 	}
-	public handle(msg: any): { cmd: string } | null {
-		if (typeof (msg.cmd) != 'string' || msg.cmd == '')
-			return { cmd: 'malformed' };
-
-		/* handle the command */
-		switch (msg.cmd) {
-			case 'state':
-				return this.state.makeState();
-			case 'update':
-				if (typeof (msg.name) != 'string')
-					return { cmd: 'malformed' };
-				if (!this.state.updatePlayer(msg.name, msg.value))
-					return { cmd: 'malformed' };
-				this.syncStateChange();
-				return null;
-			default:
-				return { cmd: 'malformed' };
-		}
-	}
 	public addPlayer(ws: mws.ClientSocket): void {
 		this.selfAlive();
 		this.ws.add(ws);
 	}
 	public dropPlayer(ws: mws.ClientSocket): void {
 		this.ws.delete(ws);
+	}
+	public queryState(): any {
+		return this.state.makeState();
+	}
+	public updatePlayer(id: string, state: any): 'outdated' | 'malformed' | null {
+		const result = this.state.updatePlayer(id, state);
+		if (result != 'valid')
+			return result;
+
+		/* mark the session as alive and write the state out to all connected sockets */
+		this.selfAlive();
+		const msg = JSON.stringify({ cmd: 'state', state: this.state.makeState() });
+		this.ws.forEach(ws => ws.send(msg));
+		return null;
 	}
 }
 interface BurntAccess {
@@ -599,26 +594,61 @@ export class QuizGame extends mws.ModuleHandler {
 		session.addPlayer(client);
 		client.log(`Websocket connected`);
 		let connectionName = '', nameLogTag = client.tagLog('');
+		let playerId: string | null = null;
 
 		/* register the callbacks */
 		client.on('data', (msg) => {
 			try {
-				let parsed = JSON.parse(msg.toString('utf-8'));
+				const parsed = JSON.parse(msg.toString('utf-8'));
+				let result = null;
 
-				/* check if a name can be assigned to the game */
-				if (typeof parsed.name == 'string' && parsed.name != connectionName)
-					nameLogTag(connectionName = parsed.name);
+				/* validate the raw message structure */
+				if (typeof (parsed.cmd) != 'string' || parsed.cmd == '')
+					result = { cmd: 'malformed' };
+
+				/* check if its a state query */
+				else if (parsed.cmd == 'state')
+					result = { cmd: 'state', state: session.queryState() };
+
+				/* check if its a login */
+				else if (parsed.cmd == 'login') {
+					if (typeof parsed.id != 'string' || parsed.id == '')
+						result = { cmd: 'malformed' };
+					else if (playerId != null)
+						result = { cmd: 'already-logged-in' };
+					else {
+						playerId = parsed.id;
+						client.log(`Logged in as: ${playerId}`);
+					}
+				}
+
+				/* check if its an update command */
+				else if (parsed.cmd == 'update') {
+					if (playerId == null)
+						result = { cmd: 'not-logged-in' };
+					else {
+						const temp = session.updatePlayer(playerId, parsed.value);
+						if (temp != null)
+							result = { cmd: temp };
+
+						/* the state must have been valid, update the socket connected name */
+						else if (parsed.value?.name != connectionName)
+							nameLogTag(connectionName = (parsed.value?.name ?? ''));
+					}
+				}
+				else
+					result = { cmd: 'malformed' };
 
 				/* handle the message accordingly */
-				let response = session.handle(parsed);
-				if (response != null) {
-					client.trace(`Received: ${parsed.cmd} -> ${response.cmd}`);
-					client.send(JSON.stringify(response));
+				if (result != null) {
+					client.trace(`Received: ${parsed.cmd} -> ${result.cmd}`);
+					client.send(JSON.stringify(result));
 				}
 				else
 					client.trace(`Received: ${parsed.cmd}`);
+
 			} catch (err: any) {
-				client.error(`Exception while message: [${err}]`);
+				client.error(`Exception while handling message: [${err}]`);
 				client.close();
 			}
 		});
@@ -813,7 +843,7 @@ export class QuizGame extends mws.ModuleHandler {
 
 		/* drop all sections (safe to iterate, even when they remove themselves) */
 		for (const [_, session] of this.sessions)
-			list.push(session.drop());
+			list.push(session.dropSession());
 		await Promise.all(list);
 	}
 }

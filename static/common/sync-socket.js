@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 class SyncSocket {
-	constructor(path) {
+	constructor(path, id) {
 		this._ws = null;
 
 		/* connection failed to be established or invalid session and reconnection will not be tried */
@@ -24,6 +24,9 @@ class SyncSocket {
 
 		/* has the connection already existed */
 		this._wasConnected = false;
+
+		/* id to use for logins (null if no logins are necessary) */
+		this._id = id;
 
 		/*
 		*	connecting: currently trying to establish connection
@@ -51,10 +54,9 @@ class SyncSocket {
 	}
 
 	/* sync the state of [name] with the value of [state] */
-	sync(name, state) {
+	sync(state) {
 		this._queued = {
 			cmd: 'update',
-			name: name,
 			value: state,
 		};
 		if (this._state == 'ready')
@@ -108,6 +110,12 @@ class SyncSocket {
 			that._state = 'ready';
 			that._wasConnected = true;
 			that._delay = 256;
+
+			/* send the initial login */
+			if (that._id != null) {
+				console.log(`Logging in as: ${that._id}`);
+				that._ws.send(JSON.stringify({ cmd: 'login', id: that._id }));
+			}
 
 			/* check if the state needs to be synced or fetched
 			*	(sync before fetching to ensure the newest state is fetched) */
@@ -176,6 +184,9 @@ class SyncSocket {
 			switch (msg.cmd) {
 				case 'unknown-session':
 					this._fatal('Unknown session!');
+					break;
+				case 'outdated':
+					console.log(`Outdated frame sent`);
 					break;
 				case 'state':
 					/* propagate the state to the client */

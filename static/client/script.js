@@ -10,7 +10,8 @@ window.onload = function () {
 	/* setup the overall state */
 	_game.state = {};
 	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'bad_id';
-	_game.name = '';
+	_game.playerId = '';
+	_game.loggedIn = '';
 	_game.self = null;
 	_game.selectDescription = '';
 	_game.selectCallback = null;
@@ -62,6 +63,7 @@ window.onload = function () {
 	};
 	_game.empty = {
 		score: 0,
+		stamp: 0,
 		ready: false,
 		payout: 0,
 		confidence: 1,
@@ -76,10 +78,10 @@ window.onload = function () {
 	_game.lastScramble = '';
 
 	/* setup the effect parameter */
-	for (const key in _game.effects) {
-		_game.effects[key].html = document.getElementById(key);
-		_game.empty.effects[key] = null;
-		_game.empty.last[key] = -100;
+	for (const effName in _game.effects) {
+		_game.effects[effName].html = document.getElementById(effName);
+		_game.empty.effects[effName] = null;
+		_game.empty.last[effName] = -100;
 	}
 
 	/* login-screen html components */
@@ -126,48 +128,76 @@ window.onload = function () {
 	_game.htmlScoreContent = document.getElementById('score-content');
 	_game.htmlToggleBoard = document.getElementById('toggle-board');
 
+	/* load the player id or check if a new id needs to be created and write the cookie back */
+	_game.playerId = (_game.getCookie('player-id') ?? crypto.randomUUID());
+	_game.setCookie('player-id', _game.playerId, __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
+
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
+	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`, _game.playerId);
 	_game.sock.onfailed = (m) => _game.failed(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = null;
 
 	/* initialize the last name from the cookies */
-	const cookieName = __LOAD_CONFIG__?.manifest?.cookie?.name ?? '';
-	if (cookieName != '') {
-		let lastName = document.cookie.split('; ').find((v) => v.startsWith(`${cookieName}=`))?.split('=')[1];
-		if (lastName != null)
-			_game.htmlName.value = lastName;
-	}
+	const lastName = _game.getCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '');
+	if (lastName != null)
+		_game.htmlName.value = lastName;
 }
 
-_game.selfChanged = function () {
-	_game.applyState(null);
-	_game.sock.sync(_game.name, _game.self);
+_game.getCookie = function (name) {
+	if (name == '')
+		return;
+	const value = document.cookie.split('; ').find((v) => v.startsWith(`${name}=`))?.split('=');
+	if (value == null)
+		return null;
+	return value[1];
+}
+_game.setCookie = function (name, value, lifetime) {
+	if (name != '' && lifetime > 0)
+		document.cookie = `${name}=${value}; expires=${new Date(Date.now() + lifetime).toUTCString()};`;
+}
+
+_game.selfChanged = function (update) {
+	if (update)
+		_game.applyState(null);
+	++_game.self.stamp;
+	_game.sock.sync(_game.self);
 }
 _game.applyState = function (state) {
 	if (state != null)
 		_game.state = state;
-	if (_game.name == '')
+	if (_game.loggedIn == '')
 		return;
-	console.log('Applying received state');
+	if (state != null)
+		console.log('Applying received state');
 
 	/* fetch the total playercount */
 	_game.totalPlayerCount = 0;
 	for (const _ in _game.state.players)
 		++_game.totalPlayerCount;
 
-	/* check if the player has started to play or has been reset or update the state */
-	if (_game.name in _game.state.players)
-		_game.self = _game.state.players[_game.name];
-	else if (_game.self == null) {
-		_game.self = { ..._game.empty };
-		_game.sock.sync(_game.name, _game.self);
+	/* check if the player state already exists or if its outdated */
+	let dirty = false, initial = (_game.self == null);
+	if (_game.playerId in _game.state.players) {
+		if (_game.self == null || _game.self.stamp <= _game.state.players[_game.playerId].stamp)
+			_game.self = _game.state.players[_game.playerId];
+		else
+			dirty = true;
 	}
+
+	/* check if the player needs to be newly created or has been removed */
+	else if (_game.self == null)
+		_game.self = { ..._game.empty }, dirty = true;
 	else {
 		_game.failed('Player has been reset');
 		return;
 	}
+
+	/* update the player name and check if the state needs to be uploaded again */
+	if (initial && _game.self.name != _game.loggedIn)
+		_game.self.name = _game.loggedIn, dirty = true;
+	if (dirty)
+		_game.selfChanged(false);
 
 	/* construct the header and footer */
 	_game.applyHeaderAndFooter();
@@ -221,25 +251,25 @@ _game.setupScramble = function () {
 		++next;
 	}
 }
-_game.canEffect = function (name, full) {
+_game.canEffect = function (effName, full) {
 	if (full && (_game.self == null || _game.self.ready || _game.state.phase != 'category'))
 		return false;
-	if ((_game.state.round - _game.self.last[name]) <= _game.effects[name].timeout)
+	if ((_game.state.round - _game.self.last[effName]) <= _game.effects[effName].timeout)
 		return false;
-	if (_game.self.effects[name] != null)
+	if (_game.self.effects[effName] != null)
 		return false;
 	return true;
 }
-_game.doEffect = function (name, value) {
-	_game.self.last[name] = _game.state.round;
-	_game.self.effects[name] = value;
-	_game.selfChanged();
+_game.doEffect = function (effName, value) {
+	_game.self.last[effName] = _game.state.round;
+	_game.self.effects[effName] = value;
+	_game.selfChanged(true);
 }
 
 /* applying-state functions */
 _game.applyHeaderAndFooter = function () {
 	/* update the current score and category */
-	_game.htmlSelfName.innerText = `Name: ${_game.name}`;
+	_game.htmlSelfName.innerText = `Name: ${_game.self.name}`;
 	_game.htmlScore.innerText = `Score: ${_game.self.score}`;
 	if (_game.state.round == null)
 		_game.htmlRound.innerText = `Round: None / ${_game.state.totalQuestions}`;
@@ -287,8 +317,8 @@ _game.applyHeaderAndFooter = function () {
 
 	/* count the number of ready players */
 	let readyCount = 0;
-	for (const key in _game.state.players) {
-		if (_game.state.players[key].ready)
+	for (const id in _game.state.players) {
+		if (_game.state.players[id].ready)
 			++readyCount;
 	}
 	_game.htmlReady.children[0].children[0].innerText = `Ready (${readyCount} / ${_game.totalPlayerCount})`;
@@ -306,9 +336,9 @@ _game.applySelection = function () {
 
 	/* collect the list of all players and sort them by their score */
 	let list = [];
-	for (const key in _game.state.players) {
-		if (key != _game.name)
-			list.push([key, _game.state.players[key].score]);
+	for (const id in _game.state.players) {
+		if (id != _game.playerId)
+			list.push([id, _game.state.players[key].score]);
 	}
 	list.sort((a, b) => ((a[1] < b[1] || (a[1] == b[1] && a[0] > b[0])) ? 1 : -1));
 
@@ -330,8 +360,9 @@ _game.applySelection = function () {
 		let node = _game.htmlSelectContent.children[i + 2];
 
 		/* add the name and score and callback */
-		node.children[0].children[0].innerText = list[i][0];
-		node.children[0].children[1].innerText = `Score: ${list[i][1]}`;
+		const player = _game.state.players[list[i][0]];
+		node.children[0].children[0].innerText = player.name;
+		node.children[0].children[1].innerText = `Score: ${player.score}`;
 		node.children[0].onclick = () => _game.pick(list[i][0]);
 	}
 
@@ -430,23 +461,23 @@ _game.applySetup = function () {
 
 	/* update the effect buttons */
 	for (const key in _game.effects)
-		_game._applyEffect(key);
+		_game.applyEffect(key);
 }
-_game._applyEffect = function (name) {
-	let can = _game.canEffect(name, false);
-	let html = _game.effects[name].html;
+_game.applyEffect = function (effName) {
+	const can = _game.canEffect(effName, false);
+	const effect = _game.effects[effName];
 
 	if (can)
-		html.classList.remove('disabled');
+		effect.html.classList.remove('disabled');
 	else
-		html.classList.add('disabled');
+		effect.html.classList.add('disabled');
 
-	if (_game.self.effects[name] != null && ('select' in _game.effects[name]))
-		html.children[0].children[2].innerText = `Selected: ${_game.self.effects[name]}`;
+	if (_game.self.effects[effName] != null && ('select' in effect))
+		effect.html.children[0].children[2].innerText = `Selected: ${_game.self.effects[effName]}`;
 	else if (can)
-		html.children[0].children[2].innerText = `Timed Out for ${_game.effects[name].timeout} Rounds`;
+		effect.html.children[0].children[2].innerText = `Timed Out for ${effect.timeout} Rounds`;
 	else
-		html.children[0].children[2].innerText = `Available in ${_game.self.last[name] + _game.effects[name].timeout - _game.state.round + 1} Rounds`;
+		effect.html.children[0].children[2].innerText = `Available in ${_game.self.last[effName] + effect.timeout - _game.state.round + 1} Rounds`;
 }
 
 /* called from/for html */
@@ -479,10 +510,10 @@ _game.failed = function (msg) {
 	_game.screen('login');
 	_game.htmlWarning.classList.remove('hidden');
 	_game.htmlWarningText.innerText = msg;
-	_game.self = null;
 	_game.selectDescription = '';
 	_game.viewScore = false;
-	_game.name = '';
+	_game.loggedIn = '';
+	_game.self = null;
 }
 _game.login = function () {
 	const name = _game.htmlName.value.trim();
@@ -511,21 +542,18 @@ _game.login = function () {
 	}
 
 	/* extract the parameter and sync the game up */
-	_game.name = name;
+	_game.loggedIn = name;
 	_game.sock.fetch();
 
-	/* write the last name as a cookie out (lifetime = 24hrs) */
-	const cookieName = __LOAD_CONFIG__?.manifest?.cookie?.name ?? '';
-	const cookieLifetime = __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0;
-	if (cookieName != '' && cookieLifetime > 0)
-		document.cookie = `${cookieName}=${_game.name}; expires=${new Date(Date.now() + cookieLifetime).toUTCString()};`;
+	/* write the last name as a cookie out */
+	_game.setCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '', __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
 }
 _game.ready = function () {
 	if (_game.self == null || _game.self.ready || _game.state.phase == 'done' || _game.totalPlayerCount < 2)
 		return;
 
 	_game.self.ready = true;
-	_game.selfChanged();
+	_game.selfChanged(true);
 }
 _game.toggleScore = function () {
 	if (_game.self == null)
@@ -538,7 +566,7 @@ _game.slide = function (v) {
 		return;
 
 	_game.self.confidence = Number(v);
-	_game.selfChanged();
+	_game.selfChanged(true);
 }
 _game.choose = function (v) {
 	if (_game.self == null || _game.self.ready || _game.state.phase != 'answer')
@@ -546,27 +574,27 @@ _game.choose = function (v) {
 
 	_game.self.choice = _game.fromScramble[v];
 	_game.self.correct = (_game.self.choice == 0);
-	_game.selfChanged();
+	_game.selfChanged(true);
 }
-_game.activate = function (name) {
-	if (!_game.canEffect(name, true))
+_game.activate = function (effName) {
+	if (!_game.canEffect(effName, true))
 		return;
-	if (!('select' in _game.effects[name])) {
-		_game.doEffect(name, _game.name);
+	if (!('select' in _game.effects[effName])) {
+		_game.doEffect(effName, _game.loggedIn);
 		return;
 	}
 
-	_game.selectDescription = _game.effects[name].select;
-	_game.selectCallback = function (v) {
-		if (v != null && _game.canEffect(name, true))
-			_game.doEffect(name, v);
+	_game.selectDescription = _game.effects[effName].select;
+	_game.selectCallback = function (id) {
+		if (v != null && _game.canEffect(effName, true))
+			_game.doEffect(effName, id);
 	};
 	_game.applyState(null);
 }
-_game.pick = function (v) {
+_game.pick = function (id) {
 	/* select-callback will automatically apply state */
 	_game.selectDescription = '';
-	_game.selectCallback(v);
+	_game.selectCallback(id);
 	_game.applyState(null);
 }
 _game.remove = function () {
@@ -574,8 +602,8 @@ _game.remove = function () {
 		_game.failed('Network issue while removing player');
 	}
 	else {
-		delete _game.state.players[_game.name];
-		_game.sock.sync(_game.name, null);
+		delete _game.state.players[_game.playerId];
+		_game.sock.sync(null);
 		_game.failed('Player has been removed');
 	}
 }

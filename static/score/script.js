@@ -19,7 +19,7 @@ window.onload = function () {
 	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'bad_id';
 
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
+	_game.sock = new SyncSocket(`${pathSockets}?id=${_game.sessionId}`);
 	_game.sock.onfailed = (m) => alert(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = () => _game.sock.fetch();

@@ -92,6 +92,10 @@ class GameState {
 				if (idVictim == null)
 					continue;
 
+				/* check if the victim has been removed from the game */
+				if (!(idVictim in this.players))
+					continue;
+
 				/* check if the victim exists and add it the the inverse-map */
 				if (!(idVictim in appliedTo))
 					appliedTo[idVictim] = { expose: null, protect: null, fail: null, zero: null, min: null, max: null, double: null, steal: null, swap: null };
@@ -499,7 +503,7 @@ export const Endpoints = {
 	/** endpoint to create a new page (automatically redirects to session page; requires Params.create) */
 	create: '/new',
 
-	/** directory for web-sockets (fully owned, auto-responds with 404; params.idByName aware) */
+	/** endpoint for web-sockets (session identified by query paramter 'id'; params.idByName aware) */
 	sockets: '/ws',
 
 	/** endpoint for created sessions (session identified by query paramter 'id') */
@@ -824,11 +828,9 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 
 		/* check if the websocket has been requested */
-		if (client.isInsideOf(Endpoints.sockets)) {
-			let id = mws.childPath(Endpoints.sockets, client.path).substring(1);
-
-			/* extract the id and try to accept the socket (web-socket protocol handles unknown ids) */
+		if (client.path == Endpoints.sockets) {
 			const ws = await client.acceptWebSocket();
+			const id = (client.url.searchParams.get('id') ?? '');
 			if (ws != null)
 				await this.acceptWebSocket(ws, id, params);
 			return;

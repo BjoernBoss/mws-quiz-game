@@ -14,10 +14,12 @@
 
 .button.correct {
 	border-color: rgb(89, 214, 89);
+	border-width: 0.4em;
 }
 
 .button.invalid {
 	border-color: rgb(214, 104, 89);
+	border-width: 0.4em
 }
 
 .clickable {

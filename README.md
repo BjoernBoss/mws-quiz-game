@@ -16,7 +16,7 @@ Requires Node.js 22 or later.
 
 ## Setup
 
-The `QuizGame` module takes an optional configuration object with a questions source and an `Access` object. Mount it under a path using `dispatch`:
+The `QuizGame` module takes an optional configuration object with a questions source and a `Params` object. Mount it under a path using `dispatch`:
 
 ```typescript
 import { Server, dispatch, addLogger, createConsoleLogger } from "@bjoernboss/mws";
@@ -27,7 +27,7 @@ addLogger(createConsoleLogger());
 const server = new Server();
 const quiz = new QuizGame({
     questions: './data/questions.json',
-    access: { create: true }
+    params: { create: true }
 });
 
 server.listen(dispatch({ '/quiz': quiz }), { port: 8080 });
@@ -54,15 +54,17 @@ Each question requires a text, category, one correct answer, and at least one in
 
 Answer options are shuffled on the client side each round.
 
-## Access Control
+## Parameters
 
-The `Access` object controls which operations are allowed. All default to `false`:
+The `Params` object controls module behavior and access. All fields are optional:
 
 | Field | Default | Description |
 |---|---|---|
-| `create` | `false` | Create new game sessions |
+| `create` | `false` | Allow creating new game sessions |
+| `idByName` | `false` | Identify players by name instead of a client-generated UUID |
+| `lifetime` | `86400000` (24h) | Cookie lifetime in milliseconds |
 
-Access can also be granted per-request through `params` when dispatching to the module. Request parameters override the corresponding default, allowing parent modules to implement authentication or per-route access policies.
+Parameters can also be set per-request through `params` when dispatching to the module. Request parameters override the corresponding default, allowing parent modules to implement authentication or per-route access policies.
 
 ## Endpoints
 
@@ -71,12 +73,12 @@ The `Endpoints` export provides the path constants used by the module. All paths
 | Path | Method | Description |
 |---|---|---|
 | `/` | GET | Welcome page with a button to create a new session |
-| `/new` | GET | Creates a new session and redirects to the session page (requires `create` access) |
+| `/new` | GET | Creates a new session and redirects to the session page (requires `create` param) |
 | `/session` | GET | Session hub: links to the player client and scoreboard (query param: `id`) |
 | `/client` | GET | Player interface for joining and playing the game (query param: `id`) |
 | `/score` | GET | Spectator scoreboard showing live game state (query param: `id`) |
 | `/static/*` | GET | Static assets (CSS, JS) served with immutable cache headers |
-| `/ws/{id}` | WebSocket | Join a game session |
+| `/ws` | WebSocket | Join a game session (query param: `id`) |
 
 ## Game Flow
 
@@ -134,7 +136,7 @@ The game is built on trust. Each WebSocket connection publishes updates of its p
 | Command | Fields | Description |
 |---|---|---|
 | `state` | `{ cmd: 'state' }` | Request the full current game state |
-| `update` | `{ cmd: 'update', name: string, value: PlayerState \| null }` | Update the named player's state, or remove the player if `value` is `null` |
+| `update` | `{ cmd: 'update', id: string, value: PlayerState \| null }` | Update the player's state, or remove the player if `value` is `null` |
 
 ### Server Messages
 
@@ -142,11 +144,15 @@ The game is built on trust. Each WebSocket connection publishes updates of its p
 |---|---|
 | `{ cmd: 'state', state: GameState }` | Full game state including phase, question, round, and all player states |
 | `{ cmd: 'malformed' }` | The client sent an invalid or unrecognized message |
+| `{ cmd: 'outdated' }` | The update's stamp is older than the server's current stamp for this player |
+| `{ cmd: 'inconsistent' }` | The player id does not match the player name (when `idByName` is enabled) |
 | `{ cmd: 'unknown-session' }` | The requested session does not exist (connection is closed) |
 
 ### Player Identity
 
-Players are identified by name. The game differentiates players solely by the name field in update messages. Logging in with the same name from multiple clients will result in both controlling the same player.
+By default, players are identified by a client-generated UUID stored in the `quiz-game-player-id` cookie. This means a player can change their display name between sessions while keeping their identity, and two clients with the same name are treated as separate players.
+
+When `idByName` is enabled, players are identified by name instead. Logging in with the same name from multiple clients will result in both controlling the same player.
 
 ## Session Lifecycle
 
@@ -154,4 +160,9 @@ Sessions are created via the `/new` endpoint and live entirely in memory. A sess
 
 ## Cookies
 
-The client page stores the last used player name in a cookie (`quiz-game-last-name`, 24-hour lifetime) so it can be pre-filled on the next visit.
+The client page uses two cookies (both with a configurable lifetime, default 24 hours):
+
+| Cookie | Description |
+|---|---|
+| `quiz-game-last-name` | Last used player name, pre-filled on the next visit |
+| `quiz-game-player-id` | Client-generated UUID used as the player identity (when `idByName` is `false`) |

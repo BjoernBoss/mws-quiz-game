@@ -133,7 +133,7 @@ window.onload = function () {
 	_game.htmlToggleBoard = document.getElementById('toggle-board');
 
 	/* setup the web-socket */
-	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
+	_game.sock = new SyncSocket(`${pathSockets}?id=${_game.sessionId}`);
 	_game.sock.onfailed = (m) => _game.failed(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
 	_game.sock.onestablished = function () {
@@ -148,7 +148,7 @@ window.onload = function () {
 	};
 
 	/* load the player id or check if a new id needs to be created and write the cookie back */
-	_game.playerId = (_game.getCookie(__LOAD_PARAMS___?.cookie?.playerId) ?? _game.makePlayerId());
+	_game.playerId = (_game.getCookie(__LOAD_PARAMS__?.cookie?.playerId) ?? _game.makePlayerId());
 	_game.setCookie(__LOAD_PARAMS__?.cookie?.playerId, _game.playerId);
 
 	/* initialize the last name from the cookies */

@@ -13,12 +13,6 @@ class SyncSocket {
 		/* executed once the connection has been established */
 		this.onestablished = null;
 
-		/* queued state to be sent to the remote */
-		this._queued = null;
-
-		/* current state has been requested from the remote */
-		this._fetch = false;
-
 		/* delay before trying to restart the connection again */
 		this._delay = 256;
 
@@ -50,22 +44,20 @@ class SyncSocket {
 		return (this._state != 'failed');
 	}
 
-	/* sync the state of [name] with the value of [state] */
+	/* sync the state of [id] with the value of [state] */
 	sync(id, state) {
-		this._queued = {
-			cmd: 'update',
-			value: state,
-			id,
-		};
-		if (this._state == 'ready')
-			this._sendState();
+		if (this._state != 'ready')
+			return;
+		console.log(`Uploading state to [${this._url}]...`);
+		this._ws.send(JSON.stringify({ cmd: 'update', value: state, id }));
 	}
 
 	/* fetch the current state from the remote */
 	fetch() {
-		this._fetch = true;
-		if (this._state == 'ready')
-			this._sendfetch();
+		if (this._state != 'ready')
+			return;
+		console.log(`Fetching state from [${this._url}]...`);
+		this._ws.send(JSON.stringify({ cmd: 'state' }));
 	}
 
 	/* retry to establish a connection */
@@ -74,16 +66,6 @@ class SyncSocket {
 			this._establish();
 	}
 
-	_sendfetch() {
-		this._fetch = false;
-		console.log(`Fetching state from [${this._url}]...`);
-		this._ws.send(JSON.stringify({ cmd: 'state' }));
-	}
-	_sendState() {
-		console.log(`Uploading state to [${this._url}]...`);
-		this._ws.send(JSON.stringify(this._queued));
-		this._queued = null;
-	}
 	_establish() {
 		console.log(`Trying to connect to [${this._url}]...`);
 		this._state = 'connecting';
@@ -108,13 +90,6 @@ class SyncSocket {
 			that._state = 'ready';
 			that._wasConnected = true;
 			that._delay = 256;
-
-			/* check if the state needs to be synced or fetched
-			*	(sync before fetching to ensure the newest state is fetched) */
-			if (that._queued != null)
-				that._sendState();
-			if (that._fetch)
-				that._sendfetch();
 
 			/* notify the client about the established connection */
 			if (that.onestablished != null)

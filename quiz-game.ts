@@ -6,8 +6,7 @@ import * as libCrypto from "crypto";
 
 const SESSION_TIMEOUT_MINUTES = 20;
 const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
-const NAME_COOKIE_NAME = 'quiz-game-last-name';
-const NAME_COOKIE_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_COOKIE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 interface QuestionState {
 	text: string;
@@ -444,6 +443,7 @@ class Session {
 interface BurntParams {
 	create: boolean;
 	idByName: boolean;
+	lifetime: number;
 }
 
 /**
@@ -466,8 +466,23 @@ export interface Params {
 	/** connection is allowed to create a session (default: false) */
 	create?: boolean;
 
-	/** player should be identified by name, not by player-id */
+	/** player should be identified by name, not by player-id (default: false) */
 	idByName?: boolean;
+
+	/** default lifetime for the cookies in milliseconds (default: 24h) */
+	lifetime?: number;
+}
+
+/**
+ *	Cookies defined and used by the quiz-game.
+ *	Are only client-bsaed, and not tracked by the module.
+ */
+export const Cookies = {
+	/** last name entered by the player, to pre-fill the name box */
+	lastName: 'quiz-game-last-name',
+
+	/** unique player-id assigned to the client (UUID, self-assigned by the client; used for non-name-id clients) */
+	playerId: 'quiz-game-player-id'
 }
 
 /**
@@ -490,7 +505,7 @@ export const Endpoints = {
 	/** endpoint for created sessions (session identified by query paramter 'id') */
 	session: '/session',
 
-	/** endpoint for player clients (session identified by query paramter 'id'; params.idByName aware) */
+	/** endpoint for player clients (session identified by query paramter 'id'; params.idByName aware; uses Cookies.*) */
 	client: '/client',
 
 	/** endpoint for scoreboard clients (session identified by query paramter 'id') */
@@ -523,7 +538,8 @@ export class QuizGame extends mws.ModuleHandler {
 		this.questionList = this.loadQuestions(options?.questions ?? this.fileAssets('/default.json'));
 		this.defaultParams = {
 			create: options?.params?.create ?? false,
-			idByName: options?.params?.idByName ?? false
+			idByName: options?.params?.idByName ?? false,
+			lifetime: options?.params?.lifetime ?? DEFAULT_COOKIE_LIFETIME_MS
 		};
 	}
 
@@ -683,10 +699,8 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
-		const loadConfig: string = JSON.stringify({
-			manifest: {
-				create: client.makePath(Endpoints.create)
-			}
+		const loadParams: string = JSON.stringify({
+			create: client.makePath(Endpoints.create)
 		});
 
 		const b = mws.build;
@@ -697,7 +711,7 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Title('Start Session!'),
 				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
 				b.LoadStyle(this.staticPath(client, '/base/style.css')),
-				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
+				b.AddScript(`__LOAD_PARAMS__=${loadParams}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -708,12 +722,10 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
-		const loadConfig: string = JSON.stringify({
-			manifest: {
-				client: client.makePath(Endpoints.client),
-				score: client.makePath(Endpoints.score),
-				timeout: SESSION_TIMEOUT_MINUTES
-			},
+		const loadParams: string = JSON.stringify({
+			client: client.makePath(Endpoints.client),
+			score: client.makePath(Endpoints.score),
+			timeout: SESSION_TIMEOUT_MINUTES,
 			valid: this.sessions.has(client.url.searchParams.get('id') ?? '')
 		});
 
@@ -725,7 +737,7 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Title('New Session Created!'),
 				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
 				b.LoadStyle(this.staticPath(client, '/base/style.css')),
-				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
+				b.AddScript(`__LOAD_PARAMS__=${loadParams}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -736,15 +748,14 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
-		const loadConfig: string = JSON.stringify({
-			manifest: {
-				sockets: client.makePath(Endpoints.sockets),
-				cookie: {
-					name: NAME_COOKIE_NAME,
-					lifetime: NAME_COOKIE_LIFETIME_MS
-				},
-				idByName: params.idByName
-			}
+		const loadParams: string = JSON.stringify({
+			sockets: client.makePath(Endpoints.sockets),
+			cookie: {
+				name: Cookies.lastName,
+				playerId: Cookies.playerId,
+				lifetime: params.lifetime
+			},
+			idByName: params.idByName
 		});
 
 		const b = mws.build;
@@ -759,7 +770,7 @@ export class QuizGame extends mws.ModuleHandler {
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
 				b.LoadScript(this.staticPath(client, '/client/script.js')),
 				b.LoadStyle(this.staticPath(client, '/client/style.css')),
-				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
+				b.AddScript(`__LOAD_PARAMS__=${loadParams}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -770,10 +781,8 @@ export class QuizGame extends mws.ModuleHandler {
 		if (body == null)
 			return;
 
-		const loadConfig: string = JSON.stringify({
-			manifest: {
-				sockets: client.makePath(Endpoints.sockets)
-			}
+		const loadParams: string = JSON.stringify({
+			sockets: client.makePath(Endpoints.sockets)
 		});
 
 		const b = mws.build;
@@ -787,7 +796,7 @@ export class QuizGame extends mws.ModuleHandler {
 				b.LoadScript(this.staticPath(client, '/common/helper.js')),
 				b.LoadScript(this.staticPath(client, '/common/sync-socket.js')),
 				b.LoadScript(this.staticPath(client, '/score/script.js')),
-				b.AddScript(`__LOAD_CONFIG__=${loadConfig}`)
+				b.AddScript(`__LOAD_PARAMS__=${loadParams}`)
 			],
 			body: b.Embed(body, true)
 		});
@@ -798,8 +807,9 @@ export class QuizGame extends mws.ModuleHandler {
 		const params: BurntParams = {
 			create: (typeof raw?.create == 'boolean' ? raw : this.defaultParams).create,
 			idByName: (typeof raw?.idByName == 'boolean' ? raw : this.defaultParams).idByName,
+			lifetime: (typeof raw?.lifetime == 'number' && isFinite(raw.lifetime) ? raw : this.defaultParams).lifetime
 		};
-		client.trace(`Game handler for [${client.path}] (C: ${params.create} | idName: ${params.idByName})`);
+		client.trace(`Game handler for [${client.path}] (create: ${params.create} | idByName: ${params.idByName} | lifetime: ${params.lifetime})`);
 
 		/* all endpoints only support 'getting' */
 		if (client.requireMethod('GET') == null)

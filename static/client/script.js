@@ -5,15 +5,16 @@ let _game = {};
 const GAME_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
 
 window.onload = function () {
-	const pathSockets = (__LOAD_CONFIG__?.manifest?.sockets ?? '/bad_manifest');
+	const pathSockets = (__LOAD_PARAMS__?.sockets ?? '/bad_path');
 
 	/* setup the overall state */
 	_game.state = {};
 	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'bad_id';
 	_game.id = '';
 	_game.playerId = '';
-	_game.idByName = (__LOAD_CONFIG__?.manifest?.idByName ?? false);
+	_game.idByName = (__LOAD_PARAMS__?.idByName ?? false);
 	_game.loggedIn = null;
+	_game.tryLogIn = false;
 	_game.self = null;
 	_game.selectDescription = '';
 	_game.selectCallback = null;
@@ -135,14 +136,23 @@ window.onload = function () {
 	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
 	_game.sock.onfailed = (m) => _game.failed(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
-	_game.sock.onestablished = null;
+	_game.sock.onestablished = function () {
+		if (_game.tryLogIn) {
+			_game.tryLogIn = false;
+			_game.login();
+		}
+		else if (_game.loggedIn != null) {
+			_game.loggedIn.applied = false;
+			_game.sock.fetch();
+		}
+	};
 
 	/* load the player id or check if a new id needs to be created and write the cookie back */
-	_game.playerId = (_game.getCookie('player-id') ?? _game.makePlayerId());
-	_game.setCookie('player-id', _game.playerId, __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
+	_game.playerId = (_game.getCookie(__LOAD_PARAMS___?.cookie?.playerId) ?? _game.makePlayerId());
+	_game.setCookie(__LOAD_PARAMS__?.cookie?.playerId, _game.playerId);
 
 	/* initialize the last name from the cookies */
-	const lastName = _game.getCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '');
+	const lastName = _game.getCookie(__LOAD_PARAMS__?.cookie?.name ?? '');
 	if (lastName != null)
 		_game.htmlName.value = lastName;
 
@@ -176,7 +186,8 @@ _game.getCookie = function (name) {
 		return null;
 	return value[1];
 }
-_game.setCookie = function (name, value, lifetime) {
+_game.setCookie = function (name, value) {
+	const lifetime = (__LOAD_PARAMS__?.cookie?.lifetime ?? 0);
 	if (name != '' && lifetime > 0)
 		document.cookie = `${name}=${value}; expires=${new Date(Date.now() + lifetime).toUTCString()};`;
 }
@@ -185,6 +196,7 @@ _game.selfChanged = function (update) {
 	if (update)
 		_game.applyState(null);
 	++_game.self.stamp;
+	console.log('Uploading dirty state');
 	_game.sock.sync(_game.id, _game.self);
 }
 _game.applyState = function (state) {
@@ -200,31 +212,43 @@ _game.applyState = function (state) {
 	for (const _ in _game.state.players)
 		++_game.totalPlayerCount;
 
-	/* check if the received state is valid and newer/the applied state (ignore old frames, as the new frames should come soon) */
-	let dirty = false;
-	if ((_game.id in _game.state.players) && (_game.self == null || _game.self.stamp <= _game.state.players[_game.id].stamp))
-		_game.self = _game.state.players[_game.id];
+	/* check if this is the initial connection after a login/re-connect */
+	if (!_game.loggedIn.applied) {
+		_game.loggedIn.applied = true;
+		let dirty = false;
 
-	/* check if the player needs to be newly created or has been removed */
-	else if (_game.self == null)
-		_game.self = { ..._game.empty }, dirty = true;
-	else {
+		/* check if no state exists yet */
+		if (_game.self == null) {
+			if (_game.id in _game.state.players)
+				_game.self = _game.state.players[_game.id];
+			else
+				_game.self = { ..._game.empty }, dirty = true;
+		}
+
+		/* check if the remote state does not exist yet or is outdated */
+		else if (!(_game.id in _game.state.players) || _game.self.stamp > _game.state.players[_game.id].stamp)
+			dirty = true;
+		else
+			_game.self = _game.state.players[_game.id];
+
+		/* apply the login name */
+		if (_game.self.name != _game.loggedIn.name)
+			_game.self.name = _game.loggedIn.name, dirty = true;
+
+		/* check if the state needs to be uploaded again */
+		if (dirty)
+			_game.selfChanged(false);
+	}
+
+	/* check if the player has been removed */
+	else if (!(_game.id in _game.state.players)) {
 		_game.failed('Player has been reset');
 		return;
 	}
 
-	/* update the player name after a login */
-	if (_game.self.name != _game.loggedIn.name) {
-		if (_game.loggedIn.applied)
-			_game.loggedIn.name = _game.self.name;
-		else
-			_game.self.name = _game.loggedIn.name, dirty = true;
-	}
-	_game.loggedIn.applied = true;
-
-	/* check if the state needs to be uploaded again */
-	if (dirty)
-		_game.selfChanged(false);
+	/* check if the remote state is newer */
+	else if (_game.self.stamp <= _game.state.players[_game.id].stamp)
+		_game.self = _game.state.players[_game.id];
 
 	/* construct the header and footer */
 	_game.applyHeaderAndFooter();
@@ -556,34 +580,20 @@ _game.login = function () {
 			_game.failed('Retrying to connect to server...');
 			_game.sock.retry();
 		}
-
-		/* register the callback to auto-log in */
-		_game.sock.onestablished = function () {
-			_game.sock.onestablished = null;
-			_game.login();
-		};
+		_game.tryLogIn = true;
 		return;
 	}
+	_game.tryLogIn = false;
+
+	/* write the last name as a cookie out */
+	_game.setCookie(__LOAD_PARAMS__?.cookie?.name ?? '', name);
 
 	/* select the playerid according to the config */
 	_game.id = (_game.idByName ? name : _game.playerId);
 
-	/* extract the parameter and sync the game up */
+	/* mark the player as logged in and fetch the cleanest data */
 	_game.loggedIn = { name, applied: false };
-	if (_game.self == null)
-		_game.sock.fetch();
-	else {
-		_game.loggedIn.applied = true;
-		if (_game.self.name == name)
-			_game.applyState(null);
-		else {
-			_game.self.name = name;
-			_game.selfChanged(true);
-		}
-	}
-
-	/* write the last name as a cookie out */
-	_game.setCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '', name, __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
+	_game.sock.fetch();
 }
 _game.ready = function () {
 	if (_game.self == null || _game.self.ready || _game.state.phase == 'done' || _game.totalPlayerCount < 2)

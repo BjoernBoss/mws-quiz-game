@@ -3,7 +3,7 @@
 let _game = {};
 
 window.onload = function () {
-	const pathSockets = (__LOAD_CONFIG__?.manifest?.sockets ?? '/bad_manifest');
+	const pathSockets = (__LOAD_PARAMS__?.sockets ?? '/bad_path');
 
 	/* caption/body components */
 	_game.htmlQuestion = document.getElementById('question');
@@ -22,10 +22,7 @@ window.onload = function () {
 	_game.sock = new SyncSocket(`${pathSockets}/${_game.sessionId}`);
 	_game.sock.onfailed = (m) => alert(m);
 	_game.sock.onupdate = (s) => _game.applyState(s);
-	_game.sock.onestablished = null;
-
-	/* fetch the initial state */
-	_game.sock.fetch();
+	_game.sock.onestablished = () => _game.sock.fetch();
 }
 _game.applyState = function (state) {
 	_game.state = state;

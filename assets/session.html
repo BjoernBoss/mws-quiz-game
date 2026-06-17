@@ -39,10 +39,10 @@
 
 <script>
 	window.onload = function () {
-		const pathClient = (__LOAD_CONFIG__?.manifest?.client ?? '/bad_manifest');
-		const pathScore = (__LOAD_CONFIG__?.manifest?.score ?? '/bad_manifest');
-		const valid = (__LOAD_CONFIG__?.valid ?? false);
-		const timeout = (__LOAD_CONFIG__?.manifest?.timeout ?? 'bad_timeout');
+		const pathClient = (__LOAD_PARAMS__?.client ?? '/bad_path');
+		const pathScore = (__LOAD_PARAMS__?.score ?? '/bad_path');
+		const timeout = (__LOAD_PARAMS__?.timeout ?? 'bad_timeout');
+		const valid = (__LOAD_PARAMS__?.valid ?? false);
 
 		document.getElementById('player').href = `${pathClient}${location.search}`;
 		document.getElementById('score').href = `${pathScore}${location.search}`;

@@ -20,7 +20,7 @@
 
 <script>
 	window.onload = function () {
-		const path = (__LOAD_CONFIG__?.manifest?.create ?? '/bad_manifest');
+		const path = (__LOAD_PARAMS__?.create ?? '/bad_path');
 		document.getElementById('create-button').href = path;
 	}
 </script>

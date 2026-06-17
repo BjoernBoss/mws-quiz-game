@@ -10,7 +10,9 @@ window.onload = function () {
 	/* setup the overall state */
 	_game.state = {};
 	_game.sessionId = new URLSearchParams(location.search).get('id') ?? 'bad_id';
+	_game.id = '';
 	_game.playerId = '';
+	_game.idByName = (__LOAD_CONFIG__?.manifest?.idByName ?? false);
 	_game.loggedIn = null;
 	_game.self = null;
 	_game.selectDescription = '';
@@ -136,15 +138,36 @@ window.onload = function () {
 	_game.sock.onestablished = null;
 
 	/* load the player id or check if a new id needs to be created and write the cookie back */
-	_game.playerId = (_game.getCookie('player-id') ?? crypto.randomUUID());
+	_game.playerId = (_game.getCookie('player-id') ?? _game.makePlayerId());
 	_game.setCookie('player-id', _game.playerId, __LOAD_CONFIG__?.manifest?.cookie?.lifetime ?? 0);
 
 	/* initialize the last name from the cookies */
 	const lastName = _game.getCookie(__LOAD_CONFIG__?.manifest?.cookie?.name ?? '');
 	if (lastName != null)
 		_game.htmlName.value = lastName;
+
+	/* add the login-enter key listener and default focus it */
+	_game.htmlName.onkeydown = function (e) {
+		if (e.key == 'Enter')
+			_game.login();
+	};
+	_game.htmlName.focus();
 }
 
+_game.makePlayerId = function () {
+	if (crypto?.randomUUID != null)
+		return crypto.randomUUID();
+	const gen = (nibbles) => {
+		let out = '';
+		for (let i = 0; i < nibbles; ++i)
+			out += '0123456789abcdef'[Math.floor(Math.random() * 16)];
+		return out;
+	};
+
+	/* build the uuid manually (no crypto available in insecure context; version: 8, variant 0b10) */
+	const version = '8', variant = '89ab'[Math.floor(Math.random() * 4)];
+	return `${gen(8)}-${gen(4)}-${version}${gen(3)}-${variant}${gen(3)}-${gen(12)}`;
+}
 _game.getCookie = function (name) {
 	if (name == '')
 		return;
@@ -162,7 +185,7 @@ _game.selfChanged = function (update) {
 	if (update)
 		_game.applyState(null);
 	++_game.self.stamp;
-	_game.sock.sync(_game.playerId, _game.self);
+	_game.sock.sync(_game.id, _game.self);
 }
 _game.applyState = function (state) {
 	if (state != null)
@@ -177,14 +200,10 @@ _game.applyState = function (state) {
 	for (const _ in _game.state.players)
 		++_game.totalPlayerCount;
 
-	/* check if the player state already exists or if its outdated */
+	/* check if the received state is valid and newer/the applied state (ignore old frames, as the new frames should come soon) */
 	let dirty = false;
-	if (_game.playerId in _game.state.players) {
-		if (_game.self == null || _game.self.stamp <= _game.state.players[_game.playerId].stamp)
-			_game.self = _game.state.players[_game.playerId];
-		else
-			dirty = true;
-	}
+	if ((_game.id in _game.state.players) && (_game.self == null || _game.self.stamp <= _game.state.players[_game.id].stamp))
+		_game.self = _game.state.players[_game.id];
 
 	/* check if the player needs to be newly created or has been removed */
 	else if (_game.self == null)
@@ -342,7 +361,7 @@ _game.applySelection = function () {
 	/* collect the list of all players and sort them by their score */
 	let list = [];
 	for (const id in _game.state.players) {
-		if (id != _game.playerId)
+		if (id != _game.id)
 			list.push([id, _game.state.players[id].score]);
 	}
 	list.sort((a, b) => ((a[1] < b[1] || (a[1] == b[1] && a[0] > b[0])) ? 1 : -1));
@@ -546,6 +565,9 @@ _game.login = function () {
 		return;
 	}
 
+	/* select the playerid according to the config */
+	_game.id = (_game.idByName ? name : _game.playerId);
+
 	/* extract the parameter and sync the game up */
 	_game.loggedIn = { name, applied: false };
 	if (_game.self == null)
@@ -607,18 +629,23 @@ _game.activate = function (effName) {
 	_game.applyState(null);
 }
 _game.pick = function (id) {
+	if (_game.self == null)
+		return;
+
 	/* select-callback will automatically apply state */
 	_game.selectDescription = '';
 	_game.selectCallback(id);
 	_game.applyState(null);
 }
 _game.remove = function () {
-	if (!_game.sock.connected()) {
+	if (_game.self == null)
+		return;
+
+	if (!_game.sock.connected())
 		_game.failed('Network issue while removing player');
-	}
 	else {
-		delete _game.state.players[_game.playerId];
-		_game.sock.sync(_game.playerId, null);
+		delete _game.state.players[_game.id];
+		_game.sock.sync(_game.id, null);
 		_game.failed('Player has been removed');
 	}
 }

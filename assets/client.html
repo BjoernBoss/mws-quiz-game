@@ -9,7 +9,7 @@
 				<div class="content">
 					<p class="title">Whats your Name?</p>
 					<div style="height:1.5em;"></div>
-					<input class="name" type="text" placeholder="Name..." id="name">
+					<input class="name" type="text" autocomplete="off" placeholder="Name..." id="name">
 					<div style="height:1.5em;"></div>
 					<div class="warning hidden" id="warning">
 						<p id="warning-text" class="text">A Warning!</p>
@@ -62,8 +62,7 @@
 				<!-- confidence slider -->
 				<div class="slider value0" id="confidence-select">
 					<p id="confidence-value">Confidence:</p>
-					<input type="range" min="-1" max="3" value="0" class="slidebar" id="confidence-slider"
-						oninput="_game.slide(this.value)">
+					<input type="range" min="-1" max="3" value="0" class="slidebar" id="confidence-slider" oninput="_game.slide(this.value)">
 				</div>
 
 				<!-- expose button -->

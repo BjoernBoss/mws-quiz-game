@@ -122,7 +122,7 @@ class GameState {
 
 			/* apply the protect-effect */
 			if (player.effects.protect != null) {
-				player.applied.push('Protected');
+				player.applied.push('Protected Self');
 				delete appliedTo[id];
 				continue;
 			}
@@ -426,7 +426,10 @@ class Session {
 	public queryState(): any {
 		return this.state.makeState();
 	}
-	public updatePlayer(id: string, state: any): 'outdated' | 'malformed' | null {
+	public updatePlayer(id: string, state: any, idByName: boolean): 'outdated' | 'malformed' | 'inconsistent' | null {
+		if (idByName && id != state?.name)
+			return 'inconsistent';
+
 		const result = this.state.updatePlayer(id, state);
 		if (result != 'valid')
 			return result;
@@ -438,8 +441,9 @@ class Session {
 		return null;
 	}
 }
-interface BurntAccess {
+interface BurntParams {
 	create: boolean;
+	idByName: boolean;
 }
 
 /**
@@ -454,12 +458,16 @@ export interface Question {
 }
 
 /**
- *	Access mask is created by merging the handler-params as access mask with the default access mask.
- *	The properties decide whether or not a given client has access to the corresponding abilities (otherwise results in 403).
+ *	Effective parameter are created by merging the handler-params as Params with the default parameter.
+ *	The properties decide whether or not a given client has access to the
+ *	corresponding abilities (otherwise results in 403), or how the module should behave.
  */
-export interface Access {
+export interface Params {
 	/** connection is allowed to create a session (default: false) */
 	create?: boolean;
+
+	/** player should be identified by name, not by player-id */
+	idByName?: boolean;
 }
 
 /**
@@ -470,19 +478,19 @@ export const Endpoints = {
 	/** directory containting static assets (sparsely used) */
 	static: '/static',
 
-	/** endpoint to create a new session (requires Access.create) */
+	/** endpoint to create a new session (requires Params.create) */
 	welcome: '/',
 
-	/** endpoint to create a new page (automatically redirects to session page; requires Access.create) */
+	/** endpoint to create a new page (automatically redirects to session page; requires Params.create) */
 	create: '/new',
 
-	/** directory for web-sockets (fully owned, auto-responds with 404) */
+	/** directory for web-sockets (fully owned, auto-responds with 404; params.idByName aware) */
 	sockets: '/ws',
 
 	/** endpoint for created sessions (session identified by query paramter 'id') */
 	session: '/session',
 
-	/** endpoint for player clients (session identified by query paramter 'id') */
+	/** endpoint for player clients (session identified by query paramter 'id'; params.idByName aware) */
 	client: '/client',
 
 	/** endpoint for scoreboard clients (session identified by query paramter 'id') */
@@ -497,14 +505,14 @@ export class QuizGame extends mws.ModuleHandler {
 	private fileAssets: (path: string) => string;
 	private questionList: QuestionState[];
 	private sessions: Map<string, Session>;
-	private defaultAccess: BurntAccess;
+	private defaultParams: BurntParams;
 
 	/**
 	 *	[questions] either describe a path to a json file of questions, or alist of questsions.
 	 *	If no questions are provided, loads the default questions.
-	 *	[access] describes the default access mask.
+	 *	[params] describes the default parameter.
 	 */
-	constructor(options?: { questions?: string | Question[], access?: Access }) {
+	constructor(options?: { questions?: string | Question[], params?: Params }) {
 		super('quiz-game');
 
 		this.fileStatic = mws.createPathSelf(import.meta.url, '../static');
@@ -513,8 +521,9 @@ export class QuizGame extends mws.ModuleHandler {
 
 		/* load the actual questions */
 		this.questionList = this.loadQuestions(options?.questions ?? this.fileAssets('/default.json'));
-		this.defaultAccess = {
-			create: options?.access?.create ?? false
+		this.defaultParams = {
+			create: options?.params?.create ?? false,
+			idByName: options?.params?.idByName ?? false
 		};
 	}
 
@@ -580,7 +589,7 @@ export class QuizGame extends mws.ModuleHandler {
 		this.sessions.set(id, session);
 		return id;
 	}
-	private async acceptWebSocket(client: mws.ClientSocket, id: string): Promise<void> {
+	private async acceptWebSocket(client: mws.ClientSocket, id: string, params: BurntParams): Promise<void> {
 		/* check if the session exists */
 		if (!this.sessions.has(id)) {
 			this.error(`WebSocket connection for unknown session: ${id}`);
@@ -614,7 +623,7 @@ export class QuizGame extends mws.ModuleHandler {
 					if (typeof parsed.id != 'string' || parsed.id == '')
 						result = { cmd: 'malformed' };
 					else {
-						const temp = session.updatePlayer(parsed.id, parsed.value);
+						const temp = session.updatePlayer(parsed.id, parsed.value, params.idByName);
 						if (temp != null)
 							result = { cmd: temp };
 
@@ -664,9 +673,9 @@ export class QuizGame extends mws.ModuleHandler {
 			return null;
 		}
 	}
-	private async buildStartupPage(client: mws.ClientRequest, access: BurntAccess): Promise<void> {
+	private async buildStartupPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
 		/* check if the client is allowed to query */
-		if (!access.create)
+		if (!params.create)
 			return client.respondForbidden('Not allowed to create sessions');
 
 		/* read the body */
@@ -722,7 +731,7 @@ export class QuizGame extends mws.ModuleHandler {
 		});
 		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
-	private async buildClientPage(client: mws.ClientRequest): Promise<void> {
+	private async buildClientPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
 		const body: string | null = await this.fetchBody(client, '/client.html');
 		if (body == null)
 			return;
@@ -733,7 +742,8 @@ export class QuizGame extends mws.ModuleHandler {
 				cookie: {
 					name: NAME_COOKIE_NAME,
 					lifetime: NAME_COOKIE_LIFETIME_MS
-				}
+				},
+				idByName: params.idByName
 			}
 		});
 
@@ -784,11 +794,12 @@ export class QuizGame extends mws.ModuleHandler {
 		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
 
-	protected override async handleRequest(client: mws.ClientRequest, params?: mws.Params): Promise<void> {
-		const access: BurntAccess = {
-			create: (typeof params?.create == 'boolean' ? params : this.defaultAccess).create
+	protected override async handleRequest(client: mws.ClientRequest, raw?: mws.Params): Promise<void> {
+		const params: BurntParams = {
+			create: (typeof raw?.create == 'boolean' ? raw : this.defaultParams).create,
+			idByName: (typeof raw?.idByName == 'boolean' ? raw : this.defaultParams).idByName,
 		};
-		client.trace(`Game handler for [${client.path}] (C: ${access.create})`);
+		client.trace(`Game handler for [${client.path}] (C: ${params.create} | idName: ${params.idByName})`);
 
 		/* all endpoints only support 'getting' */
 		if (client.requireMethod('GET') == null)
@@ -796,7 +807,7 @@ export class QuizGame extends mws.ModuleHandler {
 
 		/* check if a new session has been requested and create it */
 		if (client.path == Endpoints.create) {
-			if (!access.create)
+			if (!params.create)
 				return client.respondForbidden('Not allowed to create sessions');
 			const id = this.setupSession();
 			return client.respondSeeOther(client.makePath(`${Endpoints.session}?id=${id}`));
@@ -809,17 +820,17 @@ export class QuizGame extends mws.ModuleHandler {
 			/* extract the id and try to accept the socket (web-socket protocol handles unknown ids) */
 			const ws = await client.acceptWebSocket();
 			if (ws != null)
-				await this.acceptWebSocket(ws, id);
+				await this.acceptWebSocket(ws, id, params);
 			return;
 		}
 
 		/* check if its one of the html endpoints and build them dynamically */
 		if (client.path == Endpoints.welcome)
-			return this.buildStartupPage(client, access);
+			return this.buildStartupPage(client, params);
 		if (client.path == Endpoints.session)
 			return this.buildSessionPage(client);
 		if (client.path == Endpoints.client)
-			return this.buildClientPage(client);
+			return this.buildClientPage(client, params);
 		if (client.path == Endpoints.score)
 			return this.buildScorePage(client);
 

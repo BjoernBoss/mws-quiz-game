@@ -161,6 +161,7 @@
 	height: 1em;
 	border-radius: 0.3em;
 	border-width: 0 0 0.1em 0;
+	margin-bottom: 0.05em;
 	border-style: solid;
 	border-color: #303030;
 	font-size: 1.5em;
@@ -178,6 +179,7 @@
 .login .content .name:focus {
 	border-color: #5050ff;
 	border-width: 0 0 0.15em 0;
+	margin-bottom: 0;
 }
 
 .login .confirm {

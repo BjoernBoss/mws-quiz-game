@@ -35,22 +35,22 @@ window.onload = function () {
 			description: 'Failed by',
 		},
 		zero: {
-			timeout: 4,
+			timeout: 3,
 			select: 'Select opponent to not get any points',
 			description: 'No Points because of',
 		},
 		min: {
-			timeout: 3,
+			timeout: 4,
 			select: 'Select opponent to set the confidence to -1 to',
 			description: 'Minimum confidence because of',
 		},
 		max: {
-			timeout: 3,
+			timeout: 6,
 			select: 'Select opponent to set the confidence to 3 to',
 			description: 'Maximum confidence because of',
 		},
 		double: {
-			timeout: 10,
+			timeout: 15,
 			description: 'Double or Nothing',
 		},
 		steal: {

@@ -185,6 +185,12 @@ class GameState {
 				player.applied.push('Double or Nothing');
 				player.delta = (player.correct ? player.score : -player.score);
 			}
+
+			/* ensure that no choice does not grant the '1' for a min confidence */
+			else if (player.choice == -1) {
+				player.applied.push('Reduce Points as No Choice');
+				player.delta = Math.min(player.payout, -player.payout);
+			}
 			else
 				player.delta = (player.correct ? player.payout : -player.payout);
 		}

@@ -503,17 +503,14 @@ export const Endpoints = {
 	/** directory containting static assets (sparsely used) */
 	static: '/static',
 
-	/** endpoint to create a new session (requires Params.create) */
-	welcome: '/',
+	/** endpoint for the lobby and session creation screen (requires Params.create) */
+	lobby: '/',
 
-	/** endpoint to create a new page (automatically redirects to session page; requires Params.create) */
+	/** api endpoint to create a new session (responds with JSON session id; requires Params.create) */
 	create: '/new',
 
 	/** endpoint for web-sockets (session identified by query paramter 'id'; params.idByName aware) */
 	sockets: '/ws',
-
-	/** endpoint for created sessions (session identified by query paramter 'id') */
-	session: '/session',
 
 	/** endpoint for player clients (session identified by query paramter 'id'; params.idByName aware; uses Cookies.*) */
 	client: '/client',
@@ -699,18 +696,21 @@ export class QuizGame extends mws.ModuleHandler {
 			return null;
 		}
 	}
-	private async buildStartupPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
+	private async buildLobbyPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
 		/* check if the client is allowed to query */
 		if (!params.create)
 			return client.respondForbidden('Not allowed to create sessions');
 
 		/* read the body */
-		const body: string | null = await this.fetchBody(client, '/startup.html');
+		const body: string | null = await this.fetchBody(client, '/lobby.html');
 		if (body == null)
 			return;
 
 		const loadParams: string = JSON.stringify({
-			create: client.makePath(Endpoints.create)
+			create: client.makePath(Endpoints.create),
+			client: client.makePath(Endpoints.client),
+			score: client.makePath(Endpoints.score),
+			timeout: SESSION_TIMEOUT_MINUTES
 		});
 
 		const b = mws.build;
@@ -720,33 +720,8 @@ export class QuizGame extends mws.ModuleHandler {
 				b.Meta('viewport', 'width=device-width, initial-scale=1'),
 				b.Title('Start Session!'),
 				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
-				b.LoadStyle(this.staticPath(client, '/base/style.css')),
-				b.AddScript(`__LOAD_PARAMS__=${loadParams}`)
-			],
-			body: b.Embed(body, true)
-		});
-		await client.respondHtml(page, { status: mws.Status.Ok });
-	}
-	private async buildSessionPage(client: mws.ClientRequest): Promise<void> {
-		const body: string | null = await this.fetchBody(client, '/session.html');
-		if (body == null)
-			return;
-
-		const loadParams: string = JSON.stringify({
-			client: client.makePath(Endpoints.client),
-			score: client.makePath(Endpoints.score),
-			timeout: SESSION_TIMEOUT_MINUTES,
-			valid: this.sessions.has(client.url.searchParams.get('id') ?? '')
-		});
-
-		const b = mws.build;
-		const page = new b.HtmlPage({
-			language: 'en',
-			head: [
-				b.Meta('viewport', 'width=device-width, initial-scale=1'),
-				b.Title('New Session Created!'),
-				b.LoadStyle(this.staticPath(client, '/common/buttons.css')),
-				b.LoadStyle(this.staticPath(client, '/base/style.css')),
+				b.LoadStyle(this.staticPath(client, '/lobby/style.css')),
+				b.LoadScript(this.staticPath(client, '/lobby/script.js')),
 				b.AddScript(`__LOAD_PARAMS__=${loadParams}`)
 			],
 			body: b.Embed(body, true)
@@ -830,7 +805,7 @@ export class QuizGame extends mws.ModuleHandler {
 			if (!params.create)
 				return client.respondForbidden('Not allowed to create sessions');
 			const id = this.setupSession();
-			return client.respondSeeOther(client.makePath(`${Endpoints.session}?id=${id}`));
+			return client.respond(JSON.stringify({ id }), { media: mws.Media.Json, status: mws.Status.Ok });
 		}
 
 		/* check if the websocket has been requested */
@@ -843,10 +818,8 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 
 		/* check if its one of the html endpoints and build them dynamically */
-		if (client.path == Endpoints.welcome)
-			return this.buildStartupPage(client, params);
-		if (client.path == Endpoints.session)
-			return this.buildSessionPage(client);
+		if (client.path == Endpoints.lobby)
+			return this.buildLobbyPage(client, params);
 		if (client.path == Endpoints.client)
 			return this.buildClientPage(client, params);
 		if (client.path == Endpoints.score)

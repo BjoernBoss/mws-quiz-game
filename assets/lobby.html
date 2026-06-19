@@ -1,0 +1,56 @@
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<!-- Copyright (c) 2024-2026 Bjoern Boss Henrichsen -->
+<div contenteditable="false" class="main">
+	<div class="view">
+		<div class="padding">
+			<div class="content">
+				<p class="title" id="caption">Create a new Game Session for the Quiz!</p>
+				<div class="conditional" id="error">
+					<div style="height:2em;"></div>
+					<div class="error" id="error-text">
+						Session does not exist...
+					</div>
+				</div>
+				<div class="conditional show" id="create">
+					<div style="height:1.5em;"></div>
+					<div class="confirm">
+						<div class="button">
+							<div class="clickable" id="create-button">
+								<p>Create!</p>
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="conditional" id="select">
+					<div style="height:2em;"></div>
+					<div class="confirm">
+						<div class="button">
+							<a class="clickable" id="player">
+								<p>Player!</p>
+							</a>
+							<div class="clickable copy" id="player-copy">
+								<p>&#128203;</p>
+							</div>
+						</div>
+					</div>
+					<div style="height:1.0em;"></div>
+					<div class="confirm">
+						<div class="button">
+							<a class="clickable" id="score">
+								<p>Scoreboard!</p>
+							</a>
+							<div class="clickable copy" id="score-copy">
+								<p>&#128203;</p>
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="conditional" id="details">
+					<div style="height:1.5em;"></div>
+					<p class="detail" id="timeout"></p>
+					<p class="detail">Sessions can be rejoined by using the same name.</p>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>

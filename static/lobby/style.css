@@ -78,10 +78,6 @@
 	flex-direction: column;
 }
 
-.main .confirm .button .interact p {
-	font-size: 2.5em;
-}
-
 .main .confirm .button {
 	background-color: #a0a0a0;
 	border-radius: 1em;
@@ -93,6 +89,26 @@
 	margin: 0.2em 0;
 }
 
+.main .clickable.copy {
+	min-width: 50px;
+	max-width: 100px;
+	width: 10%;
+	height: auto;
+	align-self: stretch;
+	border-left: solid 0.25em #606060;
+	padding: 0;
+	display: none;
+}
+
+.main .clickable.copy .blank {
+	color: transparent;
+	transition: color var(--duration) ease-out;
+}
+
+.main .clickable.copy.show {
+	display: flex;
+}
+
 .main .conditional {
 	width: 100%;
 	display: none;
@@ -102,7 +118,7 @@
 	display: block;
 }
 
-.main .conditional .failed {
+.main .conditional .error {
 	width: 100%;
 	text-align: center;
 	color: red;

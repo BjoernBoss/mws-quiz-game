@@ -72,9 +72,8 @@ The `Endpoints` export provides the path constants used by the module. All paths
 
 | Path | Method | Description |
 |---|---|---|
-| `/` | GET | Welcome page with a button to create a new session |
-| `/new` | GET | Creates a new session and redirects to the session page (requires `create` param) |
-| `/session` | GET | Session hub: links to the player client and scoreboard (query param: `id`) |
+| `/` | GET | Lobby page: create a session and access the player client and scoreboard (requires `create` param) |
+| `/new` | GET | Creates a new session and responds with the session id as JSON (requires `create` param) |
 | `/client` | GET | Player interface for joining and playing the game (query param: `id`) |
 | `/score` | GET | Spectator scoreboard showing live game state (query param: `id`) |
 | `/static/*` | GET | Static assets (CSS, JS) served with immutable cache headers |
@@ -108,7 +107,7 @@ Effects are the strategic core of the game. During the `category` phase, players
 |---|---|---|
 | Expose | 2 | Reveals the question text during the category phase |
 | Protect | 4 | Blocks all effects targeting this player for the round |
-| Double or Nothing | 10 | If correct, score doubles; if wrong, score drops to zero |
+| Double or Nothing | 15 | If correct, score doubles; if wrong, score drops to zero |
 
 ### Opponent-Targeting Effects
 
@@ -117,9 +116,9 @@ These prompt the player to select an opponent:
 | Effect | Cooldown | Description |
 |---|---|---|
 | Wrong | 5 | Forces the opponent to fail regardless of their answer |
-| No Points | 4 | Prevents the opponent from earning or losing any points |
-| No Confidence | 3 | Overrides the opponent's confidence to -1 |
-| Absolute Confidence | 3 | Overrides the opponent's confidence to 3 |
+| No Points | 3 | Prevents the opponent from earning or losing any points |
+| No Confidence | 4 | Overrides the opponent's confidence to -1 |
+| Absolute Confidence | 6 | Overrides the opponent's confidence to 3 |
 | Steal Points | 5 | Steals all points the opponent earns or loses this round |
 | Swap | 8 | Swaps total scores with the opponent (only triggers if the opponent answers correctly) |
 
@@ -156,7 +155,7 @@ When `idByName` is enabled, players are identified by name instead. Logging in w
 
 ## Session Lifecycle
 
-Sessions are created via the `/new` endpoint and live entirely in memory. A session is automatically deleted after 20 minutes of inactivity (no WebSocket messages). Any WebSocket message resets the inactivity timer. All open WebSocket connections are closed when a session is deleted.
+Sessions are created via the `/new` endpoint and live entirely in memory. A session is automatically deleted after 20 minutes of inactivity. New WebSocket connections and valid player updates reset the inactivity timer. All open WebSocket connections are closed when a session is deleted.
 
 ## Cookies
 

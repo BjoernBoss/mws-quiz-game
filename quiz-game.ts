@@ -682,7 +682,7 @@ export class QuizGame extends mws.ModuleHandler {
 	private async fetchBody(client: mws.ClientRequest, path: string): Promise<string | null> {
 		const fullPath = this.fileAssets(path);
 
-		/* look for the file (will never be an immutable path) */
+		/* look for the file */
 		try {
 			const data: Buffer | null = await this.cache.read(fullPath);
 			if (data == null) {
@@ -697,9 +697,11 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 	}
 	private async buildLobbyPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
-		/* check if the client is allowed to query */
+		/* check if the client is allowed to create a session and if the method is correct */
 		if (!params.create)
-			return client.respondForbidden('Not allowed to create sessions');
+			return client.respondForbidden({ reason: 'Not allowed to create sessions' });
+		if (client.requireMethod('GET') == null)
+			return;
 
 		/* read the body */
 		const body: string | null = await this.fetchBody(client, '/lobby.html');
@@ -729,6 +731,10 @@ export class QuizGame extends mws.ModuleHandler {
 		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildClientPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
+		if (client.requireMethod('GET') == null)
+			return;
+
+		/* read the body */
 		const body: string | null = await this.fetchBody(client, '/client.html');
 		if (body == null)
 			return;
@@ -762,6 +768,10 @@ export class QuizGame extends mws.ModuleHandler {
 		await client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildScorePage(client: mws.ClientRequest): Promise<void> {
+		if (client.requireMethod('GET') == null)
+			return;
+
+		/* read the body */
 		const body: string | null = await this.fetchBody(client, '/score.html');
 		if (body == null)
 			return;
@@ -796,14 +806,12 @@ export class QuizGame extends mws.ModuleHandler {
 		};
 		client.trace(`Game handler for [${client.path}] (create: ${params.create} | idByName: ${params.idByName} | lifetime: ${params.lifetime})`);
 
-		/* all endpoints only support 'getting' */
-		if (client.requireMethod('GET') == null)
-			return;
-
 		/* check if a new session has been requested and create it */
 		if (client.path == Endpoints.create) {
 			if (!params.create)
-				return client.respondForbidden('Not allowed to create sessions');
+				return client.respondForbidden({ reason: 'Not allowed to create sessions' });
+			if (client.requireMethod('GET') == null)
+				return;
 			const id = this.setupSession();
 			return client.respond(JSON.stringify({ id }), { media: mws.Media.Json, status: mws.Status.Ok });
 		}
@@ -826,8 +834,8 @@ export class QuizGame extends mws.ModuleHandler {
 			return this.buildScorePage(client);
 
 		/* check if its just static content to be served */
-		if (client.isInsideOf(Endpoints.static))
-			await client.tryRespondFile(this.fileStatic(mws.childPath(Endpoints.static, client.path)));
+		if (client.isInsideOf(Endpoints.static) && client.requireMethod('GET') != null)
+			await client.tryRespondFile(this.fileStatic(client.getChildPath(Endpoints.static)));
 	}
 	protected override async handleStop(): Promise<void> {
 		const list: Promise<void>[] = [];

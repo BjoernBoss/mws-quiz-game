@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Copyright (c) 2026 Bjoern Boss Henrichsen */
 const DURATION_SHOW_CHECK_MS = 750;
 const DURATION_ANIMATION_RECOVER_MS = 500;
 

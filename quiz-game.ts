@@ -667,7 +667,7 @@ export class QuizGame extends mws.ModuleHandler {
 					client.trace(`Received: ${parsed.cmd}`);
 
 			} catch (err: any) {
-				client.error(`Exception while handling message: [${err}]`);
+				client.error(`Exception while handling message: [${err.message}]`);
 				client.close();
 			}
 		});

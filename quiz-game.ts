@@ -500,7 +500,7 @@ export const Cookies = {
  *	This mapping can be used to translate components of the module to different paths in the URL space.
  */
 export const Endpoints = {
-	/** directory containting static assets (sparsely used) */
+	/** directory containting static assets */
 	static: '/static',
 
 	/** endpoint for the lobby and session creation screen (requires Params.create) */
@@ -728,7 +728,7 @@ export class QuizGame extends mws.ModuleHandler {
 			],
 			body: b.Embed(body, true)
 		});
-		await client.respondHtml(page, { status: mws.Status.Ok });
+		client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildClientPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
 		if (client.requireMethod('GET') == null)
@@ -765,7 +765,7 @@ export class QuizGame extends mws.ModuleHandler {
 			],
 			body: b.Embed(body, true)
 		});
-		await client.respondHtml(page, { status: mws.Status.Ok });
+		client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildScorePage(client: mws.ClientRequest): Promise<void> {
 		if (client.requireMethod('GET') == null)
@@ -795,7 +795,7 @@ export class QuizGame extends mws.ModuleHandler {
 			],
 			body: b.Embed(body, true)
 		});
-		await client.respondHtml(page, { status: mws.Status.Ok });
+		client.respondHtml(page, { status: mws.Status.Ok });
 	}
 
 	protected override async handleRequest(client: mws.ClientRequest, raw?: mws.Params): Promise<void> {

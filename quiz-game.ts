@@ -5,7 +5,6 @@ import * as libFs from "fs";
 import * as libCrypto from "crypto";
 
 const SESSION_TIMEOUT_MINUTES = 20;
-const VALID_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
 const DEFAULT_COOKIE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 interface QuestionState {
@@ -333,7 +332,7 @@ class GameState {
 
 		if (typeof state.stamp != 'number')
 			return 'malformed';
-		if (typeof state.name != 'string' || !state.name.match(VALID_NAME_REGEX))
+		if (typeof state.name != 'string' || state.name.trim() != state.name || state.name == '')
 			return 'malformed';
 		if (typeof state.ready != 'boolean' || typeof state.correct != 'boolean')
 			return 'malformed';
@@ -651,8 +650,11 @@ export class QuizGame extends mws.ModuleHandler {
 							result = { cmd: temp };
 
 						/* the state must have been valid, update the socket connected name */
-						else if (parsed.value?.name != connectionName)
-							nameLogTag(connectionName = (parsed.value?.name ?? ''));
+						else if (parsed.value?.name != connectionName) {
+							connectionName = (parsed.value?.name ?? '');
+							const name = JSON.stringify(connectionName.trim());
+							nameLogTag(name.substring(1, name.length - 1));
+						}
 					}
 				}
 				else

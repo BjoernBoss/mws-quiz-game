@@ -2,8 +2,6 @@
 /* Copyright (c) 2024-2026 Bjoern Boss Henrichsen */
 let _game = {};
 
-const GAME_NAME_REGEX = /^[a-zA-Z0-9-_]( ?[a-zA-Z0-9-_])*$/
-
 window.onload = function () {
 	const pathSockets = (__LOAD_PARAMS__?.sockets ?? '/bad_path');
 
@@ -567,7 +565,7 @@ _game.login = function () {
 	const name = _game.htmlName.value.trim();
 
 	/* validate the name */
-	if (!name.match(GAME_NAME_REGEX)) {
+	if (name == '') {
 		_game.failed('Please Enter a Valid Name');
 		return;
 	}

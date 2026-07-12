@@ -28,7 +28,7 @@ class SyncSocket {
 
 		/* construct the url for the web-socket */
 		let protocol = (location.protocol == 'https:' ? 'wss' : 'ws');
-		this._url = new URL(path, `${protocol}://${location.host}${location.pathname}`).href;
+		this._url = `${protocol}://${location.host}${path}`;
 
 		/* try to establish the first connection */
 		this._establish();

@@ -767,7 +767,7 @@ export class QuizGame extends mws.ModuleHandler {
 			],
 			body: b.Embed(body, true)
 		});
-		client.respondHtml(page, { status: mws.Status.Ok });
+		client.respondHtml(page);
 	}
 	private async buildScorePage(client: mws.ClientRequest): Promise<void> {
 		if (client.requireMethod('GET') == null)
@@ -815,7 +815,7 @@ export class QuizGame extends mws.ModuleHandler {
 			if (client.requireMethod('GET') == null)
 				return;
 			const id = this.setupSession();
-			return client.respond(JSON.stringify({ id }), { media: mws.Media.Json, status: mws.Status.Ok });
+			return client.respondJson({ id });
 		}
 
 		/* check if the websocket has been requested */

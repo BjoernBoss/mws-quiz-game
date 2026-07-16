@@ -126,6 +126,32 @@ These prompt the player to select an opponent:
 
 Effects are resolved in a fixed order after answers are submitted: protection is applied first (blocking all incoming effects), then fail, zero, min/max, double-or-nothing, steal, and finally swap. When multiple players apply the same effect to the same target, one is chosen randomly. Mutual steals and mutual swaps cancel each other out.
 
+## Frontend
+
+The module ships with a complete browser frontend across its three pages.
+
+### Lobby
+
+- One-click session creation, resulting in shareable links to the player client and the spectator scoreboard, each with a copy-to-clipboard button.
+- Displays the inactivity timeout after which the session will be deleted, and that sessions can be rejoined by name.
+
+### Client
+
+- Players log in by name - pre-filled from the cookie - and keep a persistent identity through a client-generated UUID cookie (or the name itself with `idByName`), so a session can be rejoined after closing the page.
+- A persistent header shows name, score, round, and confidence; in the resolved phase, the effective payout and the point delta are added.
+- The question text is masked as `???` during the category phase, unless the player has activated the Expose effect.
+- Confidence is set through a color-coded slider (-1 to 3); effects are activated through buttons showing their description and a live cooldown status, and opponent-targeting effects open a selection screen listing all other players sorted by score.
+- Answer options are shuffled individually per player; in the resolved phase the correct option is highlighted green and wrong choices red.
+- The ready button shows the live ready count and requires at least two players; once ready, the interface locks until the phase advances.
+- An in-game scoreboard view can be toggled at any time and includes a confirmed "Remove Me!" option to leave the game.
+- Player updates are stamped: after a reconnect the client re-fetches the state and re-uploads any local state that is newer than the server's, so brief connection losses do not lose input. Failed connections are retried with backoff before returning to the login screen with an error.
+- The layout adapts to small screens, and hover effects are limited to mouse devices.
+
+### Scoreboard
+
+- Read-only spectator view showing the round, phase, category, and live player standings sorted by score, updated on every state change.
+- In the resolved phase it reveals the correct answer and per-player results: the chosen answer, point delta, effective confidence, and all applied effects.
+
 ## WebSocket Protocol
 
 The game is built on trust. Each WebSocket connection publishes updates of its player state, which are then pushed to all other clients. The server validates the structure of incoming updates but does not verify game logic (e.g. whether a player's answer is actually correct).

@@ -679,7 +679,7 @@ export class QuizGame extends mws.ModuleHandler {
 		});
 	}
 	private staticPath(client: mws.ClientRequest, path: string): string {
-		return client.makePath(this.cache.immutable(this.name, mws.joinSanitized(Endpoints.static, path)));
+		return client.makeImmutable(this.name, mws.joinSanitized(Endpoints.static, path));
 	}
 	private async fetchBody(client: mws.ClientRequest, path: string): Promise<string | null> {
 		const fullPath = this.fileAssets(path);

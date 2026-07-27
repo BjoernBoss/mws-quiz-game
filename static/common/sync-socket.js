@@ -23,8 +23,15 @@ class SyncSocket {
 		*	connecting: currently trying to establish connection
 		*	ready: connection ready and able to receive response
 		*	failed: failed and not retrying
+		*	hidden: failed due to being hidden; but silently retrying on becoming visible again
 		*/
 		this._state = 'connecting';
+
+		/* register the visibility-change listener */
+		document.addEventListener('visibilitychange', () => {
+			if (!document.hidden && this._state == 'hidden')
+				this._establish();
+		});
 
 		/* construct the url for the web-socket */
 		let protocol = (location.protocol == 'https:' ? 'wss' : 'ws');
@@ -79,23 +86,30 @@ class SyncSocket {
 		}
 
 		/* register all callbacks to the socket */
-		let that = this;
 		this._ws.onmessage = (m) => this._received(m);
-		this._ws.onclose = function () {
-			console.error(`Connection to remote lost [${that._url}]`);
-			that._failed(true);
+		this._ws.onclose = () => {
+			console.error(`Connection to remote lost [${this._url}]`);
+			if (document.hidden)
+				this._state = 'hidden';
+			else
+				this._failed(true);
 		};
-		this._ws.onopen = function () {
-			console.log(`Connection established to [${that._url}]`);
-			that._state = 'ready';
-			that._wasConnected = true;
-			that._delay = 256;
+		this._ws.onopen = () => {
+			console.log(`Connection established to [${this._url}]`);
+			this._state = 'ready';
+			this._wasConnected = true;
+			this._delay = 256;
 
 			/* notify the client about the established connection */
-			if (that.onestablished != null)
-				that.onestablished();
+			if (this.onestablished != null)
+				this.onestablished();
 		};
-		this._ws.onerror = () => this._failed(false);
+		this._ws.onerror = () => {
+			if (document.hidden)
+				this._state = 'hidden';
+			else
+				this._failed(false);
+		};
 	}
 	_kill() {
 		let ws = this._ws;
@@ -107,13 +121,7 @@ class SyncSocket {
 		ws.onmessage = null;
 		ws.onclose = null;
 		ws.onerror = null;
-		if (ws.readyState == WebSocket.OPEN)
-			try { ws.close(); } catch (_) { }
-		else {
-			ws.onopen = function () {
-				try { ws.close(); } catch (_) { }
-			};
-		}
+		try { ws.close(); } catch (_) { }
 	}
 	_failed(fast) {
 		this._kill();

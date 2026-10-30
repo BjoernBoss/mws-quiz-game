@@ -527,6 +527,7 @@ export class QuizGame extends mws.ModuleHandler {
 	private questionList: QuestionState[];
 	private sessions: Map<string, Session>;
 	private defaultParams: BurntParams;
+	private router?: mws.Router<BurntParams>;
 
 	/**
 	 *	[questions] either describe a path to a json file of questions, or alist of questsions.
@@ -699,11 +700,9 @@ export class QuizGame extends mws.ModuleHandler {
 		}
 	}
 	private async buildLobbyPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
-		/* check if the client is allowed to create a session and if the method is correct */
+		/* check if the client is allowed to create a session */
 		if (!params.create)
 			return client.respondForbidden({ reason: 'Not allowed to create sessions' });
-		if (client.requireMethod('GET') == null)
-			return;
 
 		/* read the body */
 		const body: string | null = await this.fetchBody(client, '/lobby.html');
@@ -733,9 +732,6 @@ export class QuizGame extends mws.ModuleHandler {
 		client.respondHtml(page, { status: mws.Status.Ok });
 	}
 	private async buildClientPage(client: mws.ClientRequest, params: BurntParams): Promise<void> {
-		if (client.requireMethod('GET') == null)
-			return;
-
 		/* read the body */
 		const body: string | null = await this.fetchBody(client, '/client.html');
 		if (body == null)
@@ -770,9 +766,6 @@ export class QuizGame extends mws.ModuleHandler {
 		client.respondHtml(page);
 	}
 	private async buildScorePage(client: mws.ClientRequest): Promise<void> {
-		if (client.requireMethod('GET') == null)
-			return;
-
 		/* read the body */
 		const body: string | null = await this.fetchBody(client, '/score.html');
 		if (body == null)
@@ -800,6 +793,20 @@ export class QuizGame extends mws.ModuleHandler {
 		client.respondHtml(page, { status: mws.Status.Ok });
 	}
 
+	private async createSession(client: mws.ClientRequest, params: BurntParams): Promise<void> {
+		if (!params.create)
+			return client.respondForbidden({ reason: 'Not allowed to create sessions' });
+		const id = this.setupSession();
+		client.respondJson({ id });
+	}
+	private async routeSocket(client: mws.ClientRequest, params: BurntParams): Promise<void> {
+		/* try to accept the web socket and handle it (await acceptance to ensure the
+		*	stop method is not entered before the full accept has been performed) */
+		const ws = await client.acceptWebSocket();
+		const id = (client.url.searchParams.get('id') ?? '');
+		if (ws != null)
+			await this.acceptWebSocket(ws, id, params);
+	}
 	protected override async handleRequest(client: mws.ClientRequest, raw?: mws.Params): Promise<void> {
 		const params: BurntParams = {
 			create: (typeof raw?.create == 'boolean' ? raw : this.defaultParams).create,
@@ -808,36 +815,18 @@ export class QuizGame extends mws.ModuleHandler {
 		};
 		client.trace(`Game handler for [${client.path}] (create: ${params.create} | idByName: ${params.idByName} | lifetime: ${params.lifetime})`);
 
-		/* check if a new session has been requested and create it */
-		if (client.path == Endpoints.create) {
-			if (!params.create)
-				return client.respondForbidden({ reason: 'Not allowed to create sessions' });
-			if (client.requireMethod('GET') == null)
-				return;
-			const id = this.setupSession();
-			return client.respondJson({ id });
-		}
+		/* check if the routing of the endpoints needs to be constructed */
+		if (this.router == null) this.router = mws.makeRouter<BurntParams>([
+			{ method: 'GET', pattern: Endpoints.create, target: (client, _, params) => this.createSession(client, params) },
+			{ method: '*', pattern: Endpoints.sockets, target: (client, _, params) => this.routeSocket(client, params) },
+			{ method: 'GET', pattern: Endpoints.lobby, target: (client, _, params) => this.buildLobbyPage(client, params) },
+			{ method: 'GET', pattern: Endpoints.client, target: (client, _, params) => this.buildClientPage(client, params) },
+			{ method: 'GET', pattern: Endpoints.score, target: (client) => this.buildScorePage(client) },
+			{ method: 'GET', pattern: `${Endpoints.static}/+file`, target: async (client, args) => { await client.tryRespondFile(this.fileStatic(args.file)); } }
+		]);
 
-		/* check if the websocket has been requested */
-		if (client.path == Endpoints.sockets) {
-			const ws = await client.acceptWebSocket();
-			const id = (client.url.searchParams.get('id') ?? '');
-			if (ws != null)
-				await this.acceptWebSocket(ws, id, params);
-			return;
-		}
-
-		/* check if its one of the html endpoints and build them dynamically */
-		if (client.path == Endpoints.lobby)
-			return this.buildLobbyPage(client, params);
-		if (client.path == Endpoints.client)
-			return this.buildClientPage(client, params);
-		if (client.path == Endpoints.score)
-			return this.buildScorePage(client);
-
-		/* check if its just static content to be served */
-		if (client.isInsideOf(Endpoints.static) && client.requireMethod('GET') != null)
-			await client.tryRespondFile(this.fileStatic(client.getChildPath(Endpoints.static)));
+		/* dispatch the request to the matching endpoint (requests not matching any route are automatically answered with not-found) */
+		await this.router(client, params);
 	}
 	protected override async handleStop(): Promise<void> {
 		const list: Promise<void>[] = [];
